@@ -61,6 +61,9 @@ const App: React.FC = () => {
   const [audioContextReady, setAudioContextReady] = useState<boolean>(false);
   const [audioInitialized, setAudioInitialized] = useState<boolean>(false);
   const [audioError, setAudioError] = useState<string | null>(null);
+  // ビートアニメーションのための状態変数を追加
+  const [beatActive, setBeatActive] = useState<boolean>(false);
+  const [isFirstBeat, setIsFirstBeat] = useState<boolean>(false);
   // 現在の小節カウンター
   const currentMeasureRef = useRef<number>(0);
   
@@ -249,6 +252,16 @@ const App: React.FC = () => {
 
         // 小節の最初の拍かどうかを判定
         const isFirstBeatOfMeasure = beatCount === 0;
+        
+        // ビートアニメーションのためのビート状態を更新
+        setBeatActive(true);
+        setIsFirstBeat(isFirstBeatOfMeasure);
+        
+        // 短い時間後に非アクティブに戻す（アニメーションのため）
+        setTimeout(() => {
+          setBeatActive(false);
+          setIsFirstBeat(false);
+        }, 100); // 100msでビートアニメーションを終了
         
         // ビートカウントと小節判定のデバッグ出力
         if (appConfig.debug) {
@@ -546,7 +559,12 @@ const App: React.FC = () => {
         
         {/* 音符表示を最大限に広げる */}
         <div className="note-display-container flex-grow">
-          <NoteDisplay currentNote={currentNote} nextNote={nextNote} />
+          <NoteDisplay 
+            currentNote={currentNote} 
+            nextNote={nextNote} 
+            beatActive={beatActive}
+            isFirstBeat={isFirstBeat}
+          />
         </div>
         
         {/* コントロールパネルとプレイボタンをフッターの上にまとめて配置 */}

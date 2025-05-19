@@ -3,12 +3,21 @@ import React from 'react';
 interface NoteDisplayProps {
   currentNote: string;
   nextNote: string;
+  beatActive?: boolean;
+  isFirstBeat?: boolean;
 }
 
-const NoteDisplay: React.FC<NoteDisplayProps> = ({ currentNote, nextNote }) => {
+const NoteDisplay: React.FC<NoteDisplayProps> = ({ currentNote, nextNote, beatActive = false, isFirstBeat = false }) => {
+  // ビートに応じたクラス名を生成
+  const backgroundClassNames = [
+    "note-background",
+    beatActive ? "beat-active" : "",
+    isFirstBeat ? "first-beat" : ""
+  ].filter(Boolean).join(" ");
+
   return (
     <div className="note-display">
-      <div className="note-background"></div>
+      <div className={backgroundClassNames}></div>
       <div className="current-note">
         {currentNote || '準備中...'}
       </div>
