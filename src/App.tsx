@@ -1,185 +1,36 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BeatManager } from './BeatManager';
+import { AudioPlayer } from './utils/AudioPlayer';
+import { NOTES } from './types/index';
 
-// 音名の配列（シャープとフラットを別々の要素として）
-const NOTES = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B'];
+// AppConfig型をインライン定義
+interface AppConfig {
+  debug: boolean;
+}
 
-// デバッグモード - デバッグ出力を確認するためにtrueに設定
-const DEBUG = false;
+// コンポーネントをインポート
+import Header from './components/Header';
+import Footer from './components/Footer';
+import ErrorMessage from './components/ErrorMessage';
+import NoteDisplay from './components/NoteDisplay';
+import MetronomeControls from './components/MetronomeControls';
+import PlayButton from './components/PlayButton';
+import ContinueDialog from './components/ContinueDialog';
+
+// スタイルをインポート
+import { containerStyle, mainContainerStyle } from './styles/commonStyles';
+
+// アプリケーション設定
+const appConfig: AppConfig = {
+  debug: false
+};
 
 // 条件付きログ出力ヘルパー関数
 const logDebug = (...args: any[]) => {
-  if (DEBUG) {
+  if (appConfig.debug) {
     console.log(...args);
   }
 };
-
-// 使用可能なメトロノーム音のタイプ
-const METRONOME_TYPES = ['type1', 'type2'];
-
-// AudioPlayerクラス - MP3ファイルを再生するためのクラス
-class AudioPlayer {
-  private audioContext: AudioContext | null = null;
-  private soundBuffers: Record<string, AudioBuffer> = {};
-  private gainNode: GainNode | null = null;
-  private metronomeType: string = 'type1'; // デフォルト値
-  private volume: number = 0.7; // デフォルトの音量 (0-1)
-  private lookaheadTime: number = 0.1; // 先読み時間（秒）
-  private scheduleAheadTime: number = 0.2; // スケジューリング先読み時間（秒）
-  private lastScheduledTime: number = 0; // 最後にスケジュールした時間
-  private nextBeatTime: number = 0; // 次の拍の時間
-  private timerID: number | null = null; // スケジューリング用タイマーID
-
-  constructor() {
-    // AudioContextはユーザーアクションの後に初期化する必要があるため、constructorでは初期化しない
-  }
-
-  // AudioContextを初期化
-  async initialize(): Promise<boolean> {
-    try {
-      if (!this.audioContext) {
-        this.audioContext = new AudioContext();
-        this.gainNode = this.audioContext.createGain();
-        this.gainNode.gain.value = this.volume;
-        this.gainNode.connect(this.audioContext.destination);
-      }
-      
-      if (this.audioContext.state === 'suspended') {
-        await this.audioContext.resume();
-      }
-      
-      // 現在時刻を設定
-      this.nextBeatTime = this.audioContext.currentTime;
-      
-      return true;
-    } catch (error) {
-      console.error('AudioContextの初期化に失敗しました:', error);
-      return false;
-    }
-  }
-
-  // メトロノーム音声ファイルをロード
-  async loadSounds(type: string = 'type1'): Promise<boolean> {
-    if (!this.audioContext) {
-      return false;
-    }
-    
-    try {
-      this.metronomeType = type;
-      
-      // メトロノーム音声をロード
-      const attackBuffer = await this.loadSound(`/assets/sounds/metronome/${type}/attack.mp3`);
-      const beatBuffer = await this.loadSound(`/assets/sounds/metronome/${type}/beat.mp3`);
-      
-      this.soundBuffers = {
-        attack: attackBuffer,
-        beat: beatBuffer
-      };
-      
-      return true;
-    } catch (error) {
-      console.error(`メトロノーム音声(${type})のロードに失敗しました:`, error);
-      return false;
-    }
-  }
-
-  // 音声ファイルをロード
-  private async loadSound(url: string): Promise<AudioBuffer> {
-    if (!this.audioContext) {
-      throw new Error('AudioContextが初期化されていません');
-    }
-    
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`音声ファイルのロードに失敗しました: ${url}`);
-    }
-    
-    const arrayBuffer = await response.arrayBuffer();
-    return await this.audioContext.decodeAudioData(arrayBuffer);
-  }
-
-  // 音声を特定の時間にスケジュール
-  scheduleSound(type: 'attack' | 'beat', time: number): void {
-    if (!this.audioContext || !this.gainNode || !this.soundBuffers[type]) {
-      return;
-    }
-    
-    const source = this.audioContext.createBufferSource();
-    source.buffer = this.soundBuffers[type];
-    source.connect(this.gainNode);
-    // 指定した時間に音を鳴らす
-    source.start(time);
-    
-    // デバッグ用ログ
-    const soundName = type === 'attack' ? 'アタック音' : 'ビート音';
-    // logDebug(`スケジュールされた音: ${soundName}, 時間: ${time.toFixed(3)}`);
-  }
-
-  // 指定したBPMで次の拍のタイミングを取得
-  nextBeat(bpm: number): number {
-    // 秒単位での拍の間隔を計算
-    const beatDuration = 60.0 / bpm;
-    // 次の拍の時間を計算
-    this.nextBeatTime += beatDuration;
-    
-    return this.nextBeatTime;
-  }
-
-  // 現在の時刻を取得
-  getCurrentTime(): number {
-    return this.audioContext?.currentTime || 0;
-  }
-
-  // 音量を設定
-  setVolume(value: number): void {
-    if (!this.gainNode) return;
-    
-    // 0-1の範囲に正規化
-    const normalizedVolume = Math.max(0, Math.min(1, value));
-    this.volume = normalizedVolume;
-    this.gainNode.gain.value = normalizedVolume;
-  }
-
-  // オーディオコンテキストの状態を取得
-  getState(): string {
-    return this.audioContext?.state || 'closed';
-  }
-
-  // オーディオコンテキストを一時停止
-  suspend(): Promise<void> {
-    return this.audioContext?.suspend() || Promise.resolve();
-  }
-
-  // オーディオコンテキストを再開
-  resume(): Promise<void> {
-    return this.audioContext?.resume() || Promise.resolve();
-  }
-
-  // スケジューリングをリセット
-  resetScheduling(): void {
-    if (this.audioContext) {
-      this.nextBeatTime = this.audioContext.currentTime;
-    }
-  }
-
-  // メトロノームタイプを変更
-  async changeMetronomeType(type: string): Promise<boolean> {
-    if (!METRONOME_TYPES.includes(type)) {
-      console.error(`無効なメトロノームタイプ: ${type}`);
-      return false;
-    }
-    
-    return await this.loadSounds(type);
-  }
-
-  // AudioContextを閉じる
-  close(): void {
-    this.audioContext?.close();
-    this.audioContext = null;
-    this.soundBuffers = {};
-    this.gainNode = null;
-  }
-}
 
 const App: React.FC = () => {
   // 状態変数
@@ -232,7 +83,7 @@ const App: React.FC = () => {
     // BeatManagerインスタンスを作成
     if (!beatManagerRef.current) {
       // BPMを設定して初期化
-      beatManagerRef.current = new BeatManager(bpm, DEBUG);
+      beatManagerRef.current = new BeatManager(bpm, appConfig.debug);
     }
     
     // コンポーネントのクリーンアップ
@@ -254,72 +105,9 @@ const App: React.FC = () => {
     };
   }, []); // 空の依存配列で最初の一度だけ実行
   
-  // 音名を更新する関数
-  const updateNotes = useCallback(() => {
-    // 現在の小節をインクリメント
-    currentMeasureRef.current += 1;
-    
-    // 指定された小節数に達したときだけ音名を更新
-    if (currentMeasureRef.current >= measureCount) {
-      // バッチ更新を使用して両方の状態を一度に更新
-      // これにより不要な再レンダリングを減らす
-      const newCurrent = nextNote || getRandomNote();
-      const newNext = getRandomNote();
-      
-      // フラグを使用して音名の更新を他のロジックから分離
-      const isUpdatingNotes = true;
-      
-      // 状態更新をバッチ処理
-      setCurrentNote(newCurrent);
-      setNextNote(newNext);
-      
-      // カウンターをリセット
-      currentMeasureRef.current = 0;
-      
-      if (DEBUG) {
-        console.log(`音名を更新: 現在の音名=${newCurrent}, 次の音名=${newNext}`);
-      }
-    }
-  }, [nextNote, getRandomNote, measureCount]);
-  
-  // AudioContextの初期化
-  const initAudioContext = useCallback(async () => {
-    try {
-      logDebug('Initializing AudioContext after user gesture');
-      
-      if (!audioPlayerRef.current) {
-        audioPlayerRef.current = new AudioPlayer();
-      }
-      
-      // AudioContextを初期化
-      const initSuccess = await audioPlayerRef.current.initialize();
-      if (!initSuccess) {
-        throw new Error('AudioContextの初期化に失敗しました');
-      }
-      
-      // メトロノーム音声をロード
-      const loadSuccess = await audioPlayerRef.current.loadSounds(metronomeType);
-      if (!loadSuccess) {
-        throw new Error('メトロノーム音声のロードに失敗しました');
-      }
-      
-      logDebug('AudioContext state:', audioPlayerRef.current.getState());
-      
-      setAudioContextReady(true);
-      setAudioInitialized(true);
-      setAudioError(null);
-      
-      return true;
-    } catch (error) {
-      console.error('AudioContextの初期化に失敗しました:', error);
-      setAudioError('音声の初期化中にエラーが発生しました。ページを再読み込みして再試行してください。');
-      return false;
-    }
-  }, [metronomeType]);
-  
   // 音名を更新する関数 - スケジューラー内で直接呼び出す
   const updateNotesDirectly = useCallback((newCurrent: string, newNext: string) => {
-    console.log(`updateNotesDirectly呼び出し: newCurrent=${newCurrent}, newNext=${newNext}`);
+    console.log(`updateNotesDirectly呼び出し: 現在=${newCurrent}, 次=${newNext}`);
     
     // setTimeout を使わず直接更新
     setCurrentNote(prevCurrent => {
@@ -342,14 +130,13 @@ const App: React.FC = () => {
       return newNext;
     });
     
-    if (DEBUG) {
+    if (appConfig.debug) {
       console.log(`音名を直接更新: 現在の音名=${newCurrent}, 次の音名=${newNext}`);
     }
   }, []);
 
   // 改善されたメトロノームの実装
   const stopMetronome = useCallback(() => {
-    // console.trace('\tメトロノームを停止します');
     // インターバルを停止
     if (intervalRef.current !== null) {
       window.clearInterval(intervalRef.current);
@@ -393,8 +180,8 @@ const App: React.FC = () => {
   // メトロノームを開始する関数
   const startMetronome = useCallback(() => {
     if (!audioContextReady || !audioPlayerRef.current) return;
-    if (DEBUG) {
-        console.trace('\tメトロノームを開始します');
+    if (appConfig.debug) {
+      console.trace('\tメトロノームを開始します');
     }
     try {
       // 既存のメトロノームを停止して完全に新しくする
@@ -410,7 +197,7 @@ const App: React.FC = () => {
       
       // BeatManagerが存在しない場合は新しく作成
       if (!beatManagerRef.current) {
-        beatManagerRef.current = new BeatManager(bpm, DEBUG);
+        beatManagerRef.current = new BeatManager(bpm, appConfig.debug);
       } else {
         // 既存のBeatManagerのBPMを更新
         beatManagerRef.current.setBpm(bpm);
@@ -439,7 +226,7 @@ const App: React.FC = () => {
         const isFirstBeatOfMeasure = beatCount === 0;
         
         // ビートカウントと小節判定のデバッグ出力
-        if (DEBUG) {
+        if (appConfig.debug) {
           console.log(`ビートカウント: ${beatCount}, 小節の1拍目？: ${isFirstBeatOfMeasure}, 小節カウント: ${localMeasureCount}`);
         }
 
@@ -449,7 +236,7 @@ const App: React.FC = () => {
           localMeasureCount++;
           
           // 小節カウントのデバッグ出力
-          if (DEBUG) {
+          if (appConfig.debug) {
             console.log(`小節カウント更新: ${localMeasureCount}`);
           }
           
@@ -496,6 +283,41 @@ const App: React.FC = () => {
       }
     };
   }, [stopMetronome]);
+  
+  // AudioContextの初期化
+  const initAudioContext = useCallback(async () => {
+    try {
+      logDebug('Initializing AudioContext after user gesture');
+      
+      if (!audioPlayerRef.current) {
+        audioPlayerRef.current = new AudioPlayer();
+      }
+      
+      // AudioContextを初期化
+      const initSuccess = await audioPlayerRef.current.initialize();
+      if (!initSuccess) {
+        throw new Error('AudioContextの初期化に失敗しました');
+      }
+      
+      // メトロノーム音声をロード
+      const loadSuccess = await audioPlayerRef.current.loadSounds(metronomeType);
+      if (!loadSuccess) {
+        throw new Error('メトロノーム音声のロードに失敗しました');
+      }
+      
+      logDebug('AudioContext state:', audioPlayerRef.current.getState());
+      
+      setAudioContextReady(true);
+      setAudioInitialized(true);
+      setAudioError(null);
+      
+      return true;
+    } catch (error) {
+      console.error('AudioContextの初期化に失敗しました:', error);
+      setAudioError('音声の初期化中にエラーが発生しました。ページを再読み込みして再試行してください。');
+      return false;
+    }
+  }, [metronomeType]);
   
   // 再生/停止の切り替え
   const togglePlayback = useCallback(async () => {
@@ -573,13 +395,12 @@ const App: React.FC = () => {
   useEffect(() => {
     // 再生中なら、新しい設定でメトロノームを再スタート
     if (isPlaying && audioContextReady) {
-    //   stopMetronome();
       // 少し遅延を入れてから再開する
       setTimeout(() => {
         startMetronome();
       }, 100);
     }
-  }, [timeSignature, isPlaying, audioContextReady, stopMetronome, startMetronome]);
+  }, [timeSignature, measureCount, isPlaying, audioContextReady, startMetronome]);
 
   // キーボードショートカットの設定
   useEffect(() => {
@@ -677,227 +498,48 @@ const App: React.FC = () => {
     }
   };
 
+  // アタック音設定変更ハンドラー
+  const handleAttackSoundChange = (useAttack: boolean) => {
+    setUseAttackSound(useAttack);
+  };
+
+  // メトロノームコントロールの状態をまとめる
+  const controlState = {
+    bpm,
+    timeSignature,
+    measureCount,
+    metronomeType,
+    useAttackSound
+  };
+
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(to bottom, #121212, #1e1e1e)', color: 'white', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ padding: '1.5rem 1rem', background: '#1a1a1a', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-        <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', textAlign: 'center', background: 'linear-gradient(to right, #a855f7, #ec4899)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>RandomTone</h1>
-      </header>
+    <div style={containerStyle}>
+      <Header title="RandomTone" />
       
-      <main style={{ flex: 1, margin: '0 auto', padding: '2rem 1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', maxWidth: '28rem' }}>
-        {audioError && (
-          <div style={{ width: '100%', background: '#ef4444', color: 'white', padding: '1rem', borderRadius: '0.5rem', marginBottom: '1.5rem', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-            <div style={{ marginBottom: '0.5rem' }}>{audioError}</div>
-            <button 
-              style={{ background: 'white', color: '#ef4444', padding: '0.5rem 1rem', borderRadius: '0.375rem', border: 'none', cursor: 'pointer' }}
-              onClick={() => window.location.reload()}>
-                再読み込み
-            </button>
-          </div>
-        )}
+      <main style={mainContainerStyle}>
+        <ErrorMessage message={audioError} />
         
-        {/* メインの音名表示領域 */}
-        <div style={{ width: '100%', marginBottom: '2rem', textAlign: 'center' }}>
-          <div style={{ fontSize: '6rem', fontWeight: 'bold', marginBottom: '1rem', padding: '3rem 0', background: '#333', borderRadius: '0.75rem', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {currentNote || '準備中...'}
-          </div>
-        </div>
+        <NoteDisplay currentNote={currentNote} nextNote={nextNote} />
         
-        {/* 次の音名 - メインの音名の後に表示 */}
-        <div style={{ width: '100%', marginBottom: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <div style={{ color: '#9ca3af', fontSize: '0.875rem', marginBottom: '0.25rem' }}>Next</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: '600', background: '#333', padding: '1rem 2rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-            {nextNote || '...'}
-          </div>
-        </div>
+        <MetronomeControls
+          controlState={controlState}
+          onBpmChange={handleBpmChange}
+          onTimeSignatureChange={handleTimeSignatureChange}
+          onMeasureCountChange={handleMeasureCountChange}
+          onMetronomeTypeChange={handleMetronomeTypeChange}
+          onAttackSoundChange={handleAttackSoundChange}
+        />
         
-        {/* コントロールパネル */}
-        <div style={{ width: '100%', marginBottom: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {/* BPMコントロール */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '1rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-            <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>BPM</div>
-            <input 
-              type="range" 
-              min="20" 
-              max="240" 
-              value={bpm} 
-              onChange={handleBpmChange}
-              style={{ 
-                appearance: 'none',
-                width: '100%',
-                height: '0.25rem',
-                background: 'linear-gradient(to right, #a855f7, #ec4899)',
-                borderRadius: '0.125rem',
-                outline: 'none',
-                cursor: 'pointer'
-              }}
-            />
-            <div style={{ color: 'white', fontWeight: 'bold', fontSize: '1.25rem' }}>{bpm}</div>
-          </div>
-          
-          {/* 拍子コントロール */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '1rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-            <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Time Signature</div>
-            <select 
-              value={timeSignature} 
-              onChange={handleTimeSignatureChange}
-              style={{ 
-                background: 'transparent',
-                color: 'white',
-                border: 'none',
-                outline: 'none',
-                fontSize: '1rem',
-                cursor: 'pointer'
-              }}
-            >
-              <option value={4}>4/4</option>
-              <option value={3}>3/4</option>
-              <option value={6}>6/8</option>
-              <option value={5}>5/4</option>
-            </select>
-          </div>
-          
-          {/* 小節数コントロール */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '1rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-            <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Measures per Tone</div>
-            <select 
-              value={measureCount} 
-              onChange={handleMeasureCountChange}
-              style={{ 
-                background: 'transparent',
-                color: 'white',
-                border: 'none',
-                outline: 'none',
-                fontSize: '1rem',
-                cursor: 'pointer'
-              }}
-            >
-              {[1, 2, 3, 4, 5, 6, 7, 8].map(count => (
-                <option key={count} value={count}>{count}</option>
-              ))}
-            </select>
-          </div>
-          
-          {/* メトロノームタイプコントロール */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '1rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-            <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Metronome Type</div>
-            <select 
-              value={metronomeType} 
-              onChange={handleMetronomeTypeChange}
-              style={{ 
-                background: 'transparent',
-                color: 'white',
-                border: 'none',
-                outline: 'none',
-                fontSize: '1rem',
-                cursor: 'pointer'
-              }}
-            >
-              <option value="type1">Type 1</option>
-              <option value="type2">Type 2</option>
-            </select>
-          </div>
-          
-          {/* アタック音設定コントロール */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '1rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
-            <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Attack Sound</div>
-            <label className="switch" style={{ display: 'flex', alignItems: 'center' }}>
-              <input 
-                type="checkbox" 
-                checked={useAttackSound} 
-                onChange={(e) => setUseAttackSound(e.target.checked)}
-                style={{ marginRight: '0.5rem' }}
-              />
-              <span style={{ color: 'white', fontSize: '1rem' }}>
-                {useAttackSound ? 'ON' : 'OFF'}
-              </span>
-            </label>
-          </div>
-        </div>
+        <PlayButton isPlaying={isPlaying} onTogglePlay={togglePlayback} />
         
-        {/* 再生/停止ボタン */}
-        <button 
-          onClick={togglePlayback}
-          style={{ 
-            background: isPlaying ? '#ef4444' : '#4caf50',
-            color: 'white',
-            padding: '1rem 2rem',
-            borderRadius: '0.5rem',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: '1.25rem',
-            fontWeight: 'bold',
-            width: '100%',
-            transition: 'background 0.3s'
-          }}
-        >
-          {isPlaying ? '停止' : '再生'}
-        </button>
-        
-        {/* 継続確認ダイアログ */}
-        {showContinueDialog && (
-          <div style={{ 
-            position: 'fixed', 
-            top: '50%', 
-            left: '50%', 
-            transform: 'translate(-50%, -50%)', 
-            background: '#1a1a1a', 
-            padding: '2rem', 
-            borderRadius: '0.5rem', 
-            boxShadow: '0 4px 8px rgba(0,0,0,0.2)', 
-            zIndex: 1000,
-            width: '90vw',
-            maxWidth: '400px'
-          }}>
-            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
-              <div style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '0.5rem' }}>再生を続けますか？</div>
-              <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>5分経過しました。続ける場合は「はい」をクリックしてください。</div>
-            </div>
-            
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <button 
-                onClick={handleContinue}
-                style={{ 
-                  background: '#4caf50', 
-                  color: 'white', 
-                  padding: '0.75rem 1.5rem', 
-                  borderRadius: '0.375rem', 
-                  border: 'none', 
-                  cursor: 'pointer', 
-                  fontSize: '1rem', 
-                  fontWeight: '500', 
-                  flex: 1, 
-                  marginRight: '0.5rem',
-                  transition: 'background 0.3s'
-                }}
-              >
-                はい
-              </button>
-              <button 
-                onClick={handleStop}
-                style={{ 
-                  background: '#ef4444', 
-                  color: 'white', 
-                  padding: '0.75rem 1.5rem', 
-                  borderRadius: '0.375rem', 
-                  border: 'none', 
-                  cursor: 'pointer', 
-                  fontSize: '1rem', 
-                  fontWeight: '500', 
-                  flex: 1,
-                  transition: 'background 0.3s'
-                }}
-              >
-                いいえ
-              </button>
-            </div>
-          </div>
-        )}
-        
-        {/* フッター */}
-        <footer style={{ padding: '1rem', textAlign: 'center', fontSize: '0.875rem', color: '#9ca3af', marginTop: 'auto' }}>
-          <div>© 2023 RandomTone. All rights reserved.</div>
-        </footer>
+        <ContinueDialog
+          isVisible={showContinueDialog}
+          onContinue={handleContinue}
+          onStop={handleStop}
+        />
       </main>
+      
+      <Footer />
     </div>
   );
 }
