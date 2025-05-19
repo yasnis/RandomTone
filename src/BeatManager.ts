@@ -19,7 +19,7 @@ export class BeatManager {
    * @param bpm テンポ (beats per minute)
    * @param debug デバッグモードの有無
    */
-  constructor(bpm: number = 60, debug: boolean = false) {
+  constructor(bpm: number = 120, debug: boolean = false) {
     this.bpm = bpm;
     this.debug = debug;
     

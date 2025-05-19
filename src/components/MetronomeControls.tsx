@@ -51,7 +51,7 @@ const MetronomeControls: React.FC<MetronomeControlsProps> = ({
         <div className="compact-controls">
           {/* 拍子コントロール */}
           <div className="compact-control-item">
-            <div className="compact-label">Time</div>
+            <div className="compact-label">Beat</div>
             <select 
               value={timeSignature} 
               onChange={onTimeSignatureChange}
@@ -66,7 +66,7 @@ const MetronomeControls: React.FC<MetronomeControlsProps> = ({
           
           {/* 小節数コントロール */}
           <div className="compact-control-item">
-            <div className="compact-label">Meas.</div>
+            <div className="compact-label">Measure num</div>
             <select 
               value={measureCount} 
               onChange={onMeasureCountChange}
@@ -86,8 +86,8 @@ const MetronomeControls: React.FC<MetronomeControlsProps> = ({
               onChange={onMetronomeTypeChange}
               className="control-select"
             >
-              <option value="type1">Type 1</option>
-              <option value="type2">Type 2</option>
+              <option value="type1">Default</option>
+              <option value="type2">Piano</option>
             </select>
           </div>
           

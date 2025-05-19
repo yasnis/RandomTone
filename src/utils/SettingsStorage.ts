@@ -39,7 +39,7 @@ export const loadSettings = (): StoredSettings => {
     const savedSettings = localStorage.getItem(STORAGE_KEY);
     if (savedSettings) {
       const parsedSettings = JSON.parse(savedSettings) as StoredSettings;
-      console.log('保存された設定を読み込みました:', parsedSettings);
+      // console.log('保存された設定を読み込みました:', parsedSettings);
       return parsedSettings;
     }
   } catch (error) {

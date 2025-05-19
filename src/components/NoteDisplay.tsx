@@ -37,6 +37,9 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({
       <div className={backgroundClassNames}></div>
       <div className="current-note">
         {currentNote || '準備中...'}
+        <div className="tap-hint">
+          {isPlaying ? 'Tap to pause' : 'Tap to play'}
+        </div>
       </div>
       <div className="next-note-container">
         <div className="next-note-label">Next:</div>
