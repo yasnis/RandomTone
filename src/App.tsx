@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { BeatManager } from './BeatManager';
+import { BeatManager } from './utils/BeatManager';
 import { AudioPlayer } from './utils/AudioPlayer';
 import { NOTES } from './types/index';
 
