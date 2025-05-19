@@ -796,6 +796,22 @@ const App: React.FC = () => {
               <option value="type2">Type 2</option>
             </select>
           </div>
+          
+          {/* アタック音設定コントロール */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '1rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+            <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Attack Sound</div>
+            <label className="switch" style={{ display: 'flex', alignItems: 'center' }}>
+              <input 
+                type="checkbox" 
+                checked={useAttackSound} 
+                onChange={(e) => setUseAttackSound(e.target.checked)}
+                style={{ marginRight: '0.5rem' }}
+              />
+              <span style={{ color: 'white', fontSize: '1rem' }}>
+                {useAttackSound ? 'ON' : 'OFF'}
+              </span>
+            </label>
+          </div>
         </div>
         
         {/* 再生/停止ボタン */}
