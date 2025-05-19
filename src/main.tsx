@@ -1,7 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import './style.css' // スタイルを最初にインポート
 import App from './App'
-import './style.css'
 
 // DOMマウントの処理を強化
 const appElement = document.getElementById('app');

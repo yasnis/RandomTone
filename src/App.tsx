@@ -3,11 +3,6 @@ import { BeatManager } from './BeatManager';
 import { AudioPlayer } from './utils/AudioPlayer';
 import { NOTES } from './types/index';
 
-// AppConfig型をインライン定義
-interface AppConfig {
-  debug: boolean;
-}
-
 // コンポーネントをインポート
 import Header from './components/Header';
 import Footer from './components/Footer';
@@ -17,8 +12,22 @@ import MetronomeControls from './components/MetronomeControls';
 import PlayButton from './components/PlayButton';
 import ContinueDialog from './components/ContinueDialog';
 
-// スタイルをインポート
-import { containerStyle, mainContainerStyle } from './styles/commonStyles';
+// 設定の保存/読み込み機能をインポート
+import { loadSettings, saveSettings, defaultSettings } from './utils/SettingsStorage';
+
+// 設定データの型定義
+type StoredSettings = {
+  bpm: number;
+  timeSignature: number;
+  measureCount: number;
+  metronomeType: string;
+  useAttackSound: boolean;
+};
+
+// AppConfig型をインライン定義
+interface AppConfig {
+  debug: boolean;
+}
 
 // アプリケーション設定
 const appConfig: AppConfig = {
@@ -33,23 +42,25 @@ const logDebug = (...args: any[]) => {
 };
 
 const App: React.FC = () => {
-  // 状態変数
-  const [bpm, setBpm] = useState<number>(60);
-  const [timeSignature, setTimeSignature] = useState<number>(4);
+  // 保存された設定を読み込む
+  const savedSettings = loadSettings();
+
+  // 状態変数（保存された設定で初期化）
+  const [bpm, setBpm] = useState<number>(savedSettings.bpm);
+  const [timeSignature, setTimeSignature] = useState<number>(savedSettings.timeSignature);
+  const [measureCount, setMeasureCount] = useState<number>(savedSettings.measureCount);
+  const [metronomeType, setMetronomeType] = useState<string>(savedSettings.metronomeType);
+  const [useAttackSound, setUseAttackSound] = useState<boolean>(savedSettings.useAttackSound);
+  
   const [isPlaying, setIsPlaying] = useState(false);
   const [showContinueDialog, setShowContinueDialog] = useState(false);
   const [continuationTimeout, setContinuationTimeout] = useState<number | null>(null);
   // 明示的に初期値を設定して音名表示が確実に初期化されるようにする
   const [currentNote, setCurrentNote] = useState<string>('C');
   const [nextNote, setNextNote] = useState<string>('G');
-  const [metronomeType, setMetronomeType] = useState<string>('type1');
   const [audioContextReady, setAudioContextReady] = useState<boolean>(false);
   const [audioInitialized, setAudioInitialized] = useState<boolean>(false);
   const [audioError, setAudioError] = useState<string | null>(null);
-  // 音名を切り替える小節数を指定する状態変数を追加
-  const [measureCount, setMeasureCount] = useState<number>(1);
-  // アタック音の有無を設定する状態変数を追加
-  const [useAttackSound, setUseAttackSound] = useState<boolean>(true);
   // 現在の小節カウンター
   const currentMeasureRef = useRef<number>(0);
   
@@ -61,6 +72,20 @@ const App: React.FC = () => {
   const intervalRef = useRef<number | null>(null);
   // ビートリスナーの削除用関数を保持する
   const beatListenerCleanupRef = useRef<(() => void) | null>(null);
+
+  // 設定変更を監視し、変更があった場合に保存する
+  useEffect(() => {
+    const currentSettings: StoredSettings = {
+      bpm,
+      timeSignature,
+      measureCount,
+      metronomeType,
+      useAttackSound
+    };
+    
+    // 設定を保存
+    saveSettings(currentSettings);
+  }, [bpm, timeSignature, measureCount, metronomeType, useAttackSound]);
   
   // ランダムな音名を取得する関数
   const getRandomNote = useCallback(() => {
@@ -513,24 +538,30 @@ const App: React.FC = () => {
   };
 
   return (
-    <div style={containerStyle}>
+    <div className="app-container">
       <Header title="RandomTone" />
       
-      <main style={mainContainerStyle}>
+      <main className="main-content">
         <ErrorMessage message={audioError} />
         
-        <NoteDisplay currentNote={currentNote} nextNote={nextNote} />
+        <div className="note-display-container">
+          <NoteDisplay currentNote={currentNote} nextNote={nextNote} />
+        </div>
         
-        <MetronomeControls
-          controlState={controlState}
-          onBpmChange={handleBpmChange}
-          onTimeSignatureChange={handleTimeSignatureChange}
-          onMeasureCountChange={handleMeasureCountChange}
-          onMetronomeTypeChange={handleMetronomeTypeChange}
-          onAttackSoundChange={handleAttackSoundChange}
-        />
+        <div className="control-panel">
+          <MetronomeControls
+            controlState={controlState}
+            onBpmChange={handleBpmChange}
+            onTimeSignatureChange={handleTimeSignatureChange}
+            onMeasureCountChange={handleMeasureCountChange}
+            onMetronomeTypeChange={handleMetronomeTypeChange}
+            onAttackSoundChange={handleAttackSoundChange}
+          />
+        </div>
         
-        <PlayButton isPlaying={isPlaying} onTogglePlay={togglePlayback} />
+        <div>
+          <PlayButton isPlaying={isPlaying} onTogglePlay={togglePlayback} />
+        </div>
         
         <ContinueDialog
           isVisible={showContinueDialog}

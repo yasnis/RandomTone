@@ -1,5 +1,4 @@
 import React from 'react';
-import { currentNoteContainerStyle, currentNoteDisplayStyle, nextNoteContainerStyle, nextNoteLabelStyle, nextNoteDisplayStyle } from '../styles/commonStyles';
 
 interface NoteDisplayProps {
   currentNote: string;
@@ -8,22 +7,17 @@ interface NoteDisplayProps {
 
 const NoteDisplay: React.FC<NoteDisplayProps> = ({ currentNote, nextNote }) => {
   return (
-    <>
-      {/* メインの音名表示領域 */}
-      <div style={currentNoteContainerStyle}>
-        <div style={currentNoteDisplayStyle}>
-          {currentNote || '準備中...'}
-        </div>
+    <div className="note-display">
+      <div className="current-note">
+        {currentNote || '準備中...'}
       </div>
-      
-      {/* 次の音名 */}
-      <div style={nextNoteContainerStyle}>
-        <div style={nextNoteLabelStyle}>Next</div>
-        <div style={nextNoteDisplayStyle}>
+      <div className="next-note-container">
+        <div className="next-note-label">Next:</div>
+        <div className="next-note-display">
           {nextNote || '...'}
         </div>
       </div>
-    </>
+    </div>
   );
 };
 

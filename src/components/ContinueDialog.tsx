@@ -1,5 +1,4 @@
-import React from 'react';
-import { dialogContainerStyle, dialogContentStyle, dialogTitleStyle, dialogMessageStyle, dialogButtonsContainerStyle, confirmButtonStyle, cancelButtonStyle } from '../styles/commonStyles';
+import React, { useEffect } from 'react';
 
 interface ContinueDialogProps {
   isVisible: boolean;
@@ -8,24 +7,57 @@ interface ContinueDialogProps {
 }
 
 const ContinueDialog: React.FC<ContinueDialogProps> = ({ isVisible, onContinue, onStop }) => {
+  // ダイアログが表示されたときにスクロールを無効にする
+  useEffect(() => {
+    if (isVisible) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isVisible]);
+
   if (!isVisible) return null;
   
   return (
-    <div style={dialogContainerStyle}>
-      <div style={dialogContentStyle}>
-        <div style={dialogTitleStyle}>再生を続けますか？</div>
-        <div style={dialogMessageStyle}>5分経過しました。続ける場合は「はい」をクリックしてください。</div>
-      </div>
+    <>
+      {/* オーバーレイ背景 */}
+      <div className="overlay"></div>
       
-      <div style={dialogButtonsContainerStyle}>
-        <button onClick={onContinue} style={confirmButtonStyle}>
-          はい
-        </button>
-        <button onClick={onStop} style={cancelButtonStyle}>
-          いいえ
-        </button>
+      {/* ダイアログ */}
+      <div className="dialog">
+        <div className="dialog-content">
+          <div className="dialog-icon-container">
+            <svg xmlns="http://www.w3.org/2000/svg" className="dialog-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div className="dialog-title">
+            再生を続けますか？
+          </div>
+          <div className="dialog-message">
+            5分経過しました。続ける場合は「はい」をクリックしてください。
+          </div>
+        </div>
+        
+        <div className="dialog-buttons">
+          <button 
+            onClick={onContinue} 
+            className="dialog-button dialog-button-confirm"
+          >
+            はい
+          </button>
+          <button 
+            onClick={onStop} 
+            className="dialog-button dialog-button-cancel"
+          >
+            いいえ
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 
