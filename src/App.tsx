@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import * as Tone from 'tone';
 
 // 音名の配列（シャープとフラットを別々の要素として）
 const NOTES = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B'];
 
-// デバッグモード - 必要に応じてオフにできる
-const DEBUG = false;
+// デバッグモード - デバッグ出力を確認するためにtrueに設定
+const DEBUG = true;
 
 // 条件付きログ出力ヘルパー関数
 const logDebug = (...args: any[]) => {
@@ -13,6 +12,173 @@ const logDebug = (...args: any[]) => {
     console.log(...args);
   }
 };
+
+// 使用可能なメトロノーム音のタイプ
+const METRONOME_TYPES = ['type1', 'type2'];
+
+// AudioPlayerクラス - MP3ファイルを再生するためのクラス
+class AudioPlayer {
+  private audioContext: AudioContext | null = null;
+  private soundBuffers: Record<string, AudioBuffer> = {};
+  private gainNode: GainNode | null = null;
+  private metronomeType: string = 'type1'; // デフォルト値
+  private volume: number = 0.7; // デフォルトの音量 (0-1)
+  private lookaheadTime: number = 0.1; // 先読み時間（秒）
+  private scheduleAheadTime: number = 0.2; // スケジューリング先読み時間（秒）
+  private lastScheduledTime: number = 0; // 最後にスケジュールした時間
+  private nextBeatTime: number = 0; // 次の拍の時間
+  private timerID: number | null = null; // スケジューリング用タイマーID
+
+  constructor() {
+    // AudioContextはユーザーアクションの後に初期化する必要があるため、constructorでは初期化しない
+  }
+
+  // AudioContextを初期化
+  async initialize(): Promise<boolean> {
+    try {
+      if (!this.audioContext) {
+        this.audioContext = new AudioContext();
+        this.gainNode = this.audioContext.createGain();
+        this.gainNode.gain.value = this.volume;
+        this.gainNode.connect(this.audioContext.destination);
+      }
+      
+      if (this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+      
+      // 現在時刻を設定
+      this.nextBeatTime = this.audioContext.currentTime;
+      
+      return true;
+    } catch (error) {
+      console.error('AudioContextの初期化に失敗しました:', error);
+      return false;
+    }
+  }
+
+  // メトロノーム音声ファイルをロード
+  async loadSounds(type: string = 'type1'): Promise<boolean> {
+    if (!this.audioContext) {
+      return false;
+    }
+    
+    try {
+      this.metronomeType = type;
+      
+      // メトロノーム音声をロード
+      const attackBuffer = await this.loadSound(`/assets/sounds/metronome/${type}/attack.mp3`);
+      const beatBuffer = await this.loadSound(`/assets/sounds/metronome/${type}/beat.mp3`);
+      
+      this.soundBuffers = {
+        attack: attackBuffer,
+        beat: beatBuffer
+      };
+      
+      return true;
+    } catch (error) {
+      console.error(`メトロノーム音声(${type})のロードに失敗しました:`, error);
+      return false;
+    }
+  }
+
+  // 音声ファイルをロード
+  private async loadSound(url: string): Promise<AudioBuffer> {
+    if (!this.audioContext) {
+      throw new Error('AudioContextが初期化されていません');
+    }
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`音声ファイルのロードに失敗しました: ${url}`);
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    return await this.audioContext.decodeAudioData(arrayBuffer);
+  }
+
+  // 音声を特定の時間にスケジュール
+  scheduleSound(type: 'attack' | 'beat', time: number): void {
+    if (!this.audioContext || !this.gainNode || !this.soundBuffers[type]) {
+      return;
+    }
+    
+    const source = this.audioContext.createBufferSource();
+    source.buffer = this.soundBuffers[type];
+    source.connect(this.gainNode);
+    // 指定した時間に音を鳴らす
+    source.start(time);
+    
+    // デバッグ用ログ
+    const soundName = type === 'attack' ? 'アタック音' : 'ビート音';
+    logDebug(`スケジュールされた音: ${soundName}, 時間: ${time.toFixed(3)}`);
+  }
+
+  // 指定したBPMで次の拍のタイミングを取得
+  nextBeat(bpm: number): number {
+    // 秒単位での拍の間隔を計算
+    const beatDuration = 60.0 / bpm;
+    // 次の拍の時間を計算
+    this.nextBeatTime += beatDuration;
+    
+    return this.nextBeatTime;
+  }
+
+  // 現在の時刻を取得
+  getCurrentTime(): number {
+    return this.audioContext?.currentTime || 0;
+  }
+
+  // 音量を設定
+  setVolume(value: number): void {
+    if (!this.gainNode) return;
+    
+    // 0-1の範囲に正規化
+    const normalizedVolume = Math.max(0, Math.min(1, value));
+    this.volume = normalizedVolume;
+    this.gainNode.gain.value = normalizedVolume;
+  }
+
+  // オーディオコンテキストの状態を取得
+  getState(): string {
+    return this.audioContext?.state || 'closed';
+  }
+
+  // オーディオコンテキストを一時停止
+  suspend(): Promise<void> {
+    return this.audioContext?.suspend() || Promise.resolve();
+  }
+
+  // オーディオコンテキストを再開
+  resume(): Promise<void> {
+    return this.audioContext?.resume() || Promise.resolve();
+  }
+
+  // スケジューリングをリセット
+  resetScheduling(): void {
+    if (this.audioContext) {
+      this.nextBeatTime = this.audioContext.currentTime;
+    }
+  }
+
+  // メトロノームタイプを変更
+  async changeMetronomeType(type: string): Promise<boolean> {
+    if (!METRONOME_TYPES.includes(type)) {
+      console.error(`無効なメトロノームタイプ: ${type}`);
+      return false;
+    }
+    
+    return await this.loadSounds(type);
+  }
+
+  // AudioContextを閉じる
+  close(): void {
+    this.audioContext?.close();
+    this.audioContext = null;
+    this.soundBuffers = {};
+    this.gainNode = null;
+  }
+}
 
 const App: React.FC = () => {
   // 状態変数
@@ -24,18 +190,19 @@ const App: React.FC = () => {
   // 明示的に初期値を設定して音名表示が確実に初期化されるようにする
   const [currentNote, setCurrentNote] = useState<string>('C');
   const [nextNote, setNextNote] = useState<string>('G');
-  const [instrumentType, setInstrumentType] = useState<string>('synth');
+  const [metronomeType, setMetronomeType] = useState<string>('type1');
   const [audioContextReady, setAudioContextReady] = useState<boolean>(false);
   const [audioInitialized, setAudioInitialized] = useState<boolean>(false);
   const [audioError, setAudioError] = useState<string | null>(null);
   // 音名を切り替える小節数を指定する状態変数を追加
   const [measureCount, setMeasureCount] = useState<number>(1);
+  // アタック音の有無を設定する状態変数を追加
+  const [useAttackSound, setUseAttackSound] = useState<boolean>(true);
   // 現在の小節カウンター
   const currentMeasureRef = useRef<number>(0);
   
-  // Tone.jsの参照
-  const synthRef = useRef<Tone.Synth | Tone.AMSynth | Tone.FMSynth | Tone.MembraneSynth | null>(null);
-  const metronomeRef = useRef<Tone.Synth | Tone.AMSynth | Tone.FMSynth | Tone.MembraneSynth | null>(null);
+  // オーディオプレーヤーの参照
+  const audioPlayerRef = useRef<AudioPlayer | null>(null);
   const eventIdRef = useRef<number | null>(null);
   const intervalRef = useRef<number | null>(null);
   
@@ -51,6 +218,20 @@ const App: React.FC = () => {
     setCurrentNote(getRandomNote());
     setNextNote(getRandomNote());
     console.log('音名が初期化されました');
+    
+    // AudioPlayerインスタンスを作成
+    if (!audioPlayerRef.current) {
+      audioPlayerRef.current = new AudioPlayer();
+    }
+    
+    // コンポーネントのクリーンアップ
+    return () => {
+      // オーディオプレーヤーをクリーンアップ
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.close();
+        audioPlayerRef.current = null;
+      }
+    };
   }, []); // 空の依存配列で最初の一度だけ実行
   
   // 音名を更新する関数
@@ -60,69 +241,49 @@ const App: React.FC = () => {
     
     // 指定された小節数に達したときだけ音名を更新
     if (currentMeasureRef.current >= measureCount) {
-      setCurrentNote(() => {
-        const newCurrent = nextNote || getRandomNote();
-        setNextNote(getRandomNote());
-        return newCurrent;
-      });
+      // バッチ更新を使用して両方の状態を一度に更新
+      // これにより不要な再レンダリングを減らす
+      const newCurrent = nextNote || getRandomNote();
+      const newNext = getRandomNote();
+      
+      // フラグを使用して音名の更新を他のロジックから分離
+      const isUpdatingNotes = true;
+      
+      // 状態更新をバッチ処理
+      setCurrentNote(newCurrent);
+      setNextNote(newNext);
+      
       // カウンターをリセット
       currentMeasureRef.current = 0;
+      
+      if (DEBUG) {
+        console.log(`音名を更新: 現在の音名=${newCurrent}, 次の音名=${newNext}`);
+      }
     }
   }, [nextNote, getRandomNote, measureCount]);
-  
-  // 選択された音色タイプに基づいてシンセサイザーを作成する関数
-  const createSynth = useCallback((type: string) => {
-    let synth;
-    
-    switch (type) {
-      case 'am':
-        synth = new Tone.AMSynth({
-          oscillator: { type: 'triangle' }
-        }).toDestination();
-        break;
-      case 'fm':
-        synth = new Tone.FMSynth({
-          oscillator: { type: 'triangle' }
-        }).toDestination();
-        break;
-      case 'membrane':
-        synth = new Tone.MembraneSynth({
-          octaves: 2,
-          pitchDecay: 0.05
-        }).toDestination();
-        break;
-      default:
-        synth = new Tone.Synth({
-          oscillator: { type: 'triangle' }
-        }).toDestination();
-        break;
-    }
-    
-    // 音量の調整
-    synth.volume.value = -15;
-    
-    return synth;
-  }, []);
   
   // AudioContextの初期化
   const initAudioContext = useCallback(async () => {
     try {
       logDebug('Initializing AudioContext after user gesture');
       
-      if (Tone.context.state === 'suspended') {
-        await Tone.context.resume();
-      } else {
-        await Tone.start();
+      if (!audioPlayerRef.current) {
+        audioPlayerRef.current = new AudioPlayer();
       }
       
-      logDebug('AudioContext state:', Tone.context.state);
+      // AudioContextを初期化
+      const initSuccess = await audioPlayerRef.current.initialize();
+      if (!initSuccess) {
+        throw new Error('AudioContextの初期化に失敗しました');
+      }
       
-      // 初期音色で両方のシンセサイザーを初期化
-      metronomeRef.current = createSynth(instrumentType);
-      synthRef.current = createSynth(instrumentType);
+      // メトロノーム音声をロード
+      const loadSuccess = await audioPlayerRef.current.loadSounds(metronomeType);
+      if (!loadSuccess) {
+        throw new Error('メトロノーム音声のロードに失敗しました');
+      }
       
-      // BPMの初期設定
-      Tone.Transport.bpm.value = bpm;
+      logDebug('AudioContext state:', audioPlayerRef.current.getState());
       
       setAudioContextReady(true);
       setAudioInitialized(true);
@@ -134,18 +295,7 @@ const App: React.FC = () => {
       setAudioError('音声の初期化中にエラーが発生しました。ページを再読み込みして再試行してください。');
       return false;
     }
-  }, [bpm, createSynth, instrumentType]);
-  
-  // BPMが変更されたときの処理
-  useEffect(() => {
-    if (audioContextReady) {
-      try {
-        Tone.Transport.bpm.value = bpm;
-      } catch (error) {
-        console.error('BPM設定中にエラーが発生しました:', error);
-      }
-    }
-  }, [bpm, audioContextReady]);
+  }, [metronomeType]);
   
   // 改善されたメトロノームの実装
   const stopMetronome = useCallback(() => {
@@ -155,20 +305,12 @@ const App: React.FC = () => {
       intervalRef.current = null;
     }
     
-    // Transportのイベントをクリア
-    try {
-      // 特定のイベントIDがあればそれだけキャンセル
-      if (eventIdRef.current !== null) {
-        Tone.Transport.clear(eventIdRef.current);
-        eventIdRef.current = null;
-      }
-      
-      Tone.Transport.stop();
-      Tone.Transport.cancel(0); // すべてのスケジュールされたイベントをキャンセル
-      
-    } catch (error) {
-      console.error('メトロノーム停止中にエラーが発生しました:', error);
+    // タイマーをクリア
+    if (eventIdRef.current !== null) {
+      window.clearTimeout(eventIdRef.current);
+      eventIdRef.current = null;
     }
+    
   }, []);
   
   // 継続確認タイマーをスタートする関数
@@ -194,7 +336,7 @@ const App: React.FC = () => {
   
   // メトロノームを開始する関数
   const startMetronome = useCallback(() => {
-    if (!audioContextReady || !metronomeRef.current) return;
+    if (!audioContextReady || !audioPlayerRef.current) return;
     
     try {
       // 既存のメトロノームを停止して完全に新しくする
@@ -203,95 +345,111 @@ const App: React.FC = () => {
       // 小節カウンターをリセット
       currentMeasureRef.current = 0;
       
-      // 音声コンテキストのリセットを試みる
-      Tone.context.resume().then(() => {
-        logDebug('オーディオコンテキストを再開しました:', Tone.context.state);
-      }).catch(err => {
+      // 音声コンテキストの再開を試みる
+      audioPlayerRef.current.resume().catch(err => {
         console.error('オーディオコンテキスト再開中にエラーが発生しました:', err);
-      }); // 未処理の例外を防止
+      });
       
-      // Transportの設定
-      Tone.Transport.stop();  // 念のため停止
-      Tone.Transport.cancel(0);  // すべてのイベントをクリア
-      Tone.Transport.bpm.value = bpm;
+      // スケジューリングをリセット
+      audioPlayerRef.current.resetScheduling();
       
-      // 音名の更新用タイマー - テンポとは独立して一定間隔で更新
-      const measureDuration = (60 / bpm) * timeSignature * 1000; // ミリ秒単位の1小節
-      
-      // 1小節ごとに更新関数を呼び出し（内部で小節数をカウント）
-      intervalRef.current = window.setInterval(() => {
-        updateNotes();
-      }, measureDuration);
-      
-      // Tone.jsの新しいスケジューリング方法
+      // 小節カウントと拍カウントを初期化
       let beatCount = 0;
+      let localMeasureCount = 0;  // 名前を変更してグローバルなmeasureCountと競合しないようにする
+      let nextNoteTime = audioPlayerRef.current.getCurrentTime(); // 最初の音のタイミング
       
-      // 単純なワンショットイベントを繰り返し登録する方式に変更
-      const scheduleNextBeat = () => {
-        const now = Tone.now();
-        // 小節の最初の拍は異なる音で
-        const note = beatCount % timeSignature === 0 ? 'C5' : 'B4';
-        
-        // 次の拍を0.1秒後にスケジュール（十分な余裕を持つ）
-        const scheduleTime = now + 0.1;
-        
-        try {
-          if (metronomeRef.current) {
-            metronomeRef.current.triggerAttackRelease(note, '16n', scheduleTime);
-          }
-          
-          // 小節の先頭で現在の音色をログ出力（デバッグ用）
-          if (beatCount % timeSignature === 0 && DEBUG) {
-            logDebug('拍:', beatCount, '音色:', instrumentType);
-          }
-          
-          // 次の拍のスケジュール設定
-          const nextBeatTime = Tone.Transport.toSeconds('4n'); // 4分音符の長さ
-          
-          // 次の拍を再スケジュール
-          eventIdRef.current = Tone.Transport.scheduleOnce(() => {
-            beatCount++;
-            scheduleNextBeat();
-          }, `+${nextBeatTime}`); // 次の拍の時間を相対的に指定
-        } catch (error) {
-          console.error('拍のスケジューリングエラー:', error);
+      // 先読み時間（秒）
+      const scheduleAheadTime = 0.1;
+      
+      // 次の拍をスケジュールするための関数
+      const scheduler = () => {
+        // 現在のスケジューラが有効かチェック
+        if (!audioPlayerRef.current || !isPlaying) {
+          return;
         }
+        
+        // 現在時刻から先読み時間内にスケジュールすべきビートがあるかをチェック
+        const currentTime = audioPlayerRef.current.getCurrentTime();
+        
+        // スケジュール済みの時間が現在時間 + 先読み時間より前であれば、次の拍をスケジュール
+        while (nextNoteTime < currentTime + scheduleAheadTime) {
+          // 小節の最初の拍かどうかを判定
+          const isFirstBeatOfMeasure = beatCount % timeSignature === 0;
+          
+          // ビートカウントと小節判定のデバッグ出力
+          if (DEBUG) {
+            console.log(`ビートカウント: ${beatCount}, 小節の1拍目？: ${isFirstBeatOfMeasure}, 小節カウント: ${localMeasureCount}`);
+          }
+          
+          // 小節の最初の拍で小節カウントを更新
+          if (isFirstBeatOfMeasure && beatCount > 0) { // beatCount > 0 は初回の処理をスキップするため
+            // この行にもデバッグ出力
+            console.log(`小節カウント更新: ${localMeasureCount} -> ${localMeasureCount + 1}, ビート=${beatCount}`);
+            
+            // 小節カウントを増加
+            localMeasureCount++;
+            
+            // 音名の更新が必要かチェック (設定された小節数に達したかどうか)
+            if (localMeasureCount >= measureCount) {
+              // 音名を更新
+              const newCurrent = nextNote || getRandomNote();
+              const newNext = getRandomNote();
+              
+              // 音名更新のタイミングを明示的にログ出力
+              console.log(`===音名更新のタイミング: 時間=${nextNoteTime.toFixed(3)}, ビート=${beatCount}===`);
+              
+              // updateNotesDirectly関数を使って状態を更新
+              updateNotesDirectly(newCurrent, newNext);
+              
+              // カウンターをリセット
+              localMeasureCount = 0;
+            }
+          }
+          
+          // アタック音を使用するかどうかの設定に基づいて音を選択
+          const soundType = (isFirstBeatOfMeasure && useAttackSound) ? 'attack' : 'beat';
+          
+          // デバッグ用ログ
+          if (DEBUG) {
+            const beatType = isFirstBeatOfMeasure ? '小節の1拍目' : `${(beatCount % timeSignature) + 1}拍目`;
+            logDebug(`スケジュール - ${beatType}, サウンド: ${soundType}, 時間: ${nextNoteTime.toFixed(3)}`);
+          }
+          
+          // 音をスケジュール
+          if (audioPlayerRef.current) {
+            audioPlayerRef.current.scheduleSound(soundType, nextNoteTime);
+          }
+          
+          // ビートカウントを更新
+          beatCount++;
+          
+          // 次の拍のタイミングを計算
+          const secondsPerBeat = 60.0 / bpm;
+          nextNoteTime += secondsPerBeat;
+        }
+        
+        // 次のスケジューリングのタイミングを設定
+        eventIdRef.current = window.setTimeout(scheduler, 25); // 25msごとにスケジューリングを確認
       };
       
-      // 最初の拍をスケジュール
-      scheduleNextBeat();
-      
-      // Transportを開始
-      Tone.Transport.start();
+      // スケジューリングを開始
+      scheduler();
       
     } catch (error) {
       console.error('メトロノーム開始中にエラーが発生しました:', error);
       setAudioError('メトロノームの開始中にエラーが発生しました。ページを再読み込みしてください。');
     }
-  }, [audioContextReady, bpm, timeSignature, instrumentType, stopMetronome, updateNotes]);
-
+  }, [audioContextReady, bpm, timeSignature, stopMetronome, updateNotes, useAttackSound, isPlaying, nextNote, getRandomNote]);
+  
   // コンポーネントのアンマウント時の処理
   useEffect(() => {
     return () => {
       stopMetronome();
       
-      try {
-        if (synthRef.current) {
-          synthRef.current.dispose();
-          synthRef.current = null;
-        }
-        
-        if (metronomeRef.current) {
-          metronomeRef.current.dispose();
-          metronomeRef.current = null;
-        }
-        
-        if (Tone.Transport.state === 'started') {
-          Tone.Transport.stop();
-          Tone.Transport.cancel(0); // すべてのスケジュールされたイベントをキャンセル
-        }
-      } catch (error) {
-        console.error('クリーンアップ中にエラーが発生しました:', error);
+      // オーディオプレーヤーをクリーンアップ
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.close();
+        audioPlayerRef.current = null;
       }
     };
   }, [stopMetronome]);
@@ -302,9 +460,11 @@ const App: React.FC = () => {
     if (!audioInitialized) {
       const success = await initAudioContext();
       if (!success) return;
-    } else if (!audioContextReady || Tone.context.state !== 'running') {
+    } else if (!audioContextReady || (audioPlayerRef.current && audioPlayerRef.current.getState() !== 'running')) {
       try {
-        await Tone.context.resume();
+        if (audioPlayerRef.current) {
+          await audioPlayerRef.current.resume();
+        }
         setAudioContextReady(true);
       } catch (error) {
         console.error('AudioContextの再開に失敗しました:', error);
@@ -315,8 +475,9 @@ const App: React.FC = () => {
     
     try {
       if (isPlaying) {
-        stopMetronome();
+        // まず再生状態を更新してからメトロノームを停止
         setIsPlaying(false);
+        stopMetronome();
         
         // 反復処理のタイムアウトをクリア
         if (continuationTimeout) {
@@ -324,11 +485,14 @@ const App: React.FC = () => {
           setContinuationTimeout(null);
         }
       } else {
-        startMetronome();
+        // まず再生状態を更新してからメトロノームを開始
         setIsPlaying(true);
-        
-        // 5分後に確認ダイアログを表示するタイマーをセット
-        startContinuationTimer();
+        // わずかな遅延を入れて状態更新が反映されるのを待つ
+        setTimeout(() => {
+          startMetronome();
+          // 5分後に確認ダイアログを表示するタイマーをセット
+          startContinuationTimer();
+        }, 10);
       }
     } catch (error) {
       console.error('再生/停止中にエラーが発生しました:', error);
@@ -441,45 +605,62 @@ const App: React.FC = () => {
     setMeasureCount(value);
   };
   
-  // 音色変更ハンドラー
-  const handleInstrumentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  // メトロノームタイプ変更ハンドラー
+  const handleMetronomeTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newType = e.target.value;
+    setMetronomeType(newType);
+    
     if (!audioContextReady) {
-      initAudioContext();
       return;
     }
     
-    const value = e.target.value;
-    setInstrumentType(value);
-    
     try {
-      // 両方のシンセサイザーを更新
-      if (synthRef.current) {
-        synthRef.current.dispose();
-      }
-      
-      if (metronomeRef.current) {
-        metronomeRef.current.dispose();
-      }
-      
-      // 新しい音色のシンセサイザーを作成
-      synthRef.current = createSynth(value);
-      metronomeRef.current = createSynth(value);
-      
-      logDebug('音色を変更しました:', value);
-      
-      // 再生中の場合はメトロノームを再起動して新しい音色を即座に反映
-      if (isPlaying) {
-        stopMetronome();
-        // 少し遅延を入れてから再開する
-        setTimeout(() => {
-          startMetronome();
-        }, 100);
+      // 音声を切り替え
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.changeMetronomeType(newType).then(success => {
+          if (!success) {
+            console.error(`メトロノームタイプの変更に失敗しました: ${newType}`);
+          } else {
+            logDebug(`メトロノームタイプを変更しました: ${newType}`);
+          }
+          
+          // 再生中の場合はメトロノームを再起動して新しい音声を即座に反映
+          if (isPlaying) {
+            stopMetronome();
+            setTimeout(() => {
+              startMetronome();
+            }, 100);
+          }
+        });
       }
     } catch (error) {
-      console.error('音色変更中にエラーが発生しました:', error);
-      setAudioError('音色の変更中にエラーが発生しました。');
+      console.error('メトロノームタイプ変更中にエラーが発生しました:', error);
+      setAudioError('メトロノームタイプの変更中にエラーが発生しました。');
     }
   };
+
+  // 音名を更新する関数 - スケジューラー内で直接呼び出す
+  const updateNotesDirectly = useCallback((newCurrent: string, newNext: string) => {
+    // フラグを使用して状態更新中であることをマーク
+    const isUpdating = true;
+    
+    // setTimeout を使わず直接更新
+    setCurrentNote(prevCurrent => {
+      // 前の音名と同じなら更新しない（再レンダリング防止）
+      if (prevCurrent === newCurrent) return prevCurrent;
+      return newCurrent;
+    });
+    
+    setNextNote(prevNext => {
+      // 前の音名と同じなら更新しない（再レンダリング防止）
+      if (prevNext === newNext) return prevNext;
+      return newNext;
+    });
+    
+    if (DEBUG) {
+      console.log(`音名を直接更新: 現在の音名=${newCurrent}, 次の音名=${newNext}`);
+    }
+  }, []);
 
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(to bottom, #121212, #1e1e1e)', color: 'white', display: 'flex', flexDirection: 'column' }}>
@@ -556,19 +737,17 @@ const App: React.FC = () => {
             </div>
 
             <div>
-              <label htmlFor="instrumentType" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#d1d5db' }}>
-                音色
+              <label htmlFor="metronomeType" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#d1d5db' }}>
+                メトロノーム音
               </label>
               <select
-                id="instrumentType"
-                value={instrumentType}
-                onChange={handleInstrumentChange}
+                id="metronomeType"
+                value={metronomeType}
+                onChange={handleMetronomeTypeChange}
                 style={{ width: '100%', background: '#1f2937', border: '1px solid #4b5563', borderRadius: '0.375rem', padding: '0.5rem 0.75rem', color: 'white', outline: 'none' }}
               >
-                <option value="synth">Synth</option>
-                <option value="am">AM Synth</option>
-                <option value="fm">FM Synth</option>
-                <option value="membrane">Membrane</option>
+                <option value="type1">タイプ1</option>
+                <option value="type2">タイプ2</option>
               </select>
             </div>
           </div>
@@ -591,6 +770,19 @@ const App: React.FC = () => {
               />
               <span style={{ marginLeft: '0.5rem', fontSize: '0.875rem' }}>8</span>
             </div>
+          </div>
+
+          {/* アタック音設定用チェックボックスを追加 */}
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={useAttackSound}
+                onChange={(e) => setUseAttackSound(e.target.checked)}
+                style={{ marginRight: '0.5rem', width: '1rem', height: '1rem', accentColor: '#8b5cf6' }}
+              />
+              <span style={{ fontSize: '0.875rem', color: '#d1d5db' }}>1拍目のアクセント音を使用する</span>
+            </label>
           </div>
 
           <button
