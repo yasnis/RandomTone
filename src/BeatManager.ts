@@ -32,22 +32,12 @@ export class BeatManager {
    * @param bpm 新しいBPM値
    */
   setBpm(bpm: number): void {
-    const wasRunning = this.isRunning();
-    
-    // 実行中の場合は一度停止
-    if (wasRunning) {
-      this.stop();
-    }
-    
+
     this.bpm = bpm;
-    
-    // 実行中だった場合は再開
-    if (wasRunning) {
-      this.start();
-    }
+    this.start(); // BPM変更時にビート処理を再起動
 
     if (this.debug) {
-      console.log(`BPM changed to ${bpm}`);
+      console.trace(`BPM changed to ${bpm}`);
     }
   }
 
@@ -63,7 +53,10 @@ export class BeatManager {
    */
   private start(): void {
     if (this.intervalID !== null) {
-      this.stop(); // すでに実行中の場合は停止してからリスタート
+      window.cancelAnimationFrame(this.intervalID);
+      this.intervalID = null;
+      this.start(); // 再帰的に開始
+      return;
     }
     
     // 現在時刻を記録
@@ -106,33 +99,6 @@ export class BeatManager {
     }
   }
 
-  /**
-   * ビート処理を停止する
-   */
-  private stop(): void {
-    if (this.intervalID !== null) {
-      window.cancelAnimationFrame(this.intervalID);
-      this.intervalID = null;
-      
-      if (this.debug) {
-        console.log('Beat manager stopped');
-      }
-    }
-  }
-  
-  /**
-   * 現在実行中かどうかを返す
-   */
-  private isPlaying(): boolean {
-    return this.isRunning();
-  }
-
-  /**
-   * 実行中かどうかを確認する
-   */
-  private isRunning(): boolean {
-    return this.intervalID !== null;
-  }
 
   /**
    * ビートイベントのリスナーを追加する

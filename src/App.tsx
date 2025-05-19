@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { BeatManager } from './BeatManager';
 
 // 音名の配列（シャープとフラットを別々の要素として）
 const NOTES = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B'];
@@ -111,7 +112,7 @@ class AudioPlayer {
     
     // デバッグ用ログ
     const soundName = type === 'attack' ? 'アタック音' : 'ビート音';
-    logDebug(`スケジュールされた音: ${soundName}, 時間: ${time.toFixed(3)}`);
+    // logDebug(`スケジュールされた音: ${soundName}, 時間: ${time.toFixed(3)}`);
   }
 
   // 指定したBPMで次の拍のタイミングを取得
@@ -203,8 +204,12 @@ const App: React.FC = () => {
   
   // オーディオプレーヤーの参照
   const audioPlayerRef = useRef<AudioPlayer | null>(null);
+  // BeatManagerの参照を追加
+  const beatManagerRef = useRef<BeatManager | null>(null);
   const eventIdRef = useRef<number | null>(null);
   const intervalRef = useRef<number | null>(null);
+  // ビートリスナーの削除用関数を保持する
+  const beatListenerCleanupRef = useRef<(() => void) | null>(null);
   
   // ランダムな音名を取得する関数
   const getRandomNote = useCallback(() => {
@@ -224,13 +229,28 @@ const App: React.FC = () => {
       audioPlayerRef.current = new AudioPlayer();
     }
     
+    // BeatManagerインスタンスを作成
+    if (!beatManagerRef.current) {
+      // BPMを設定して初期化
+      beatManagerRef.current = new BeatManager(bpm, DEBUG);
+    }
+    
     // コンポーネントのクリーンアップ
     return () => {
+      // BeatManagerのリスナーをクリーンアップ
+      if (beatListenerCleanupRef.current) {
+        beatListenerCleanupRef.current();
+        beatListenerCleanupRef.current = null;
+      }
+      
       // オーディオプレーヤーをクリーンアップ
       if (audioPlayerRef.current) {
         audioPlayerRef.current.close();
         audioPlayerRef.current = null;
       }
+      
+      // BeatManagerの参照をクリア
+      beatManagerRef.current = null;
     };
   }, []); // 空の依存配列で最初の一度だけ実行
   
@@ -297,8 +317,29 @@ const App: React.FC = () => {
     }
   }, [metronomeType]);
   
+  // 音名を更新する関数 - スケジューラー内で直接呼び出す
+  const updateNotesDirectly = useCallback((newCurrent: string, newNext: string) => {
+    // setTimeout を使わず直接更新
+    setCurrentNote(prevCurrent => {
+      // 前の音名と同じなら更新しない（再レンダリング防止）
+      if (prevCurrent === newCurrent) return prevCurrent;
+      return newCurrent;
+    });
+    
+    setNextNote(prevNext => {
+      // 前の音名と同じなら更新しない（再レンダリング防止）
+      if (prevNext === newNext) return prevNext;
+      return newNext;
+    });
+    
+    if (DEBUG) {
+      console.log(`音名を直接更新: 現在の音名=${newCurrent}, 次の音名=${newNext}`);
+    }
+  }, []);
+
   // 改善されたメトロノームの実装
   const stopMetronome = useCallback(() => {
+    // console.trace('\tメトロノームを停止します');
     // インターバルを停止
     if (intervalRef.current !== null) {
       window.clearInterval(intervalRef.current);
@@ -311,6 +352,11 @@ const App: React.FC = () => {
       eventIdRef.current = null;
     }
     
+    // BeatManagerのリスナーをクリーンアップ
+    if (beatListenerCleanupRef.current) {
+      beatListenerCleanupRef.current();
+      beatListenerCleanupRef.current = null;
+    }
   }, []);
   
   // 継続確認タイマーをスタートする関数
@@ -337,7 +383,7 @@ const App: React.FC = () => {
   // メトロノームを開始する関数
   const startMetronome = useCallback(() => {
     if (!audioContextReady || !audioPlayerRef.current) return;
-    
+    console.trace('\tメトロノームを開始します');
     try {
       // 既存のメトロノームを停止して完全に新しくする
       stopMetronome();
@@ -350,96 +396,84 @@ const App: React.FC = () => {
         console.error('オーディオコンテキスト再開中にエラーが発生しました:', err);
       });
       
-      // スケジューリングをリセット
-      audioPlayerRef.current.resetScheduling();
+      // BeatManagerが存在しない場合は新しく作成
+      if (!beatManagerRef.current) {
+        beatManagerRef.current = new BeatManager(bpm, DEBUG);
+      } else {
+        // 既存のBeatManagerのBPMを更新
+        // beatManagerRef.current.setBpm(bpm);
+      }
       
       // 小節カウントと拍カウントを初期化
-      let beatCount = 0;
+      let beatCount = timeSignature - 1; // 1小節内の拍カウント (0から始まり timeSignature - 1 まで)
       let localMeasureCount = 0;  // 名前を変更してグローバルなmeasureCountと競合しないようにする
-      let nextNoteTime = audioPlayerRef.current.getCurrentTime(); // 最初の音のタイミング
       
-      // 先読み時間（秒）
-      const scheduleAheadTime = 0.1;
+      // 以前のリスナーが存在する場合はクリア
+      if (beatListenerCleanupRef.current) {
+        beatListenerCleanupRef.current();
+        beatListenerCleanupRef.current = null;
+      }
       
-      // 次の拍をスケジュールするための関数
-      const scheduler = () => {
-        // 現在のスケジューラが有効かチェック
-        if (!audioPlayerRef.current || !isPlaying) {
-          return;
+      // BeatManagerにビートイベントリスナーを登録
+      beatListenerCleanupRef.current = beatManagerRef.current.addBeatListener(() => {
+        // ビートカウントを更新
+        beatCount = (beatCount + 1) % timeSignature;
+
+        // 小節の最初の拍かどうかを判定
+        const isFirstBeatOfMeasure = beatCount === 0;
+        
+        // ビートカウントと小節判定のデバッグ出力
+        if (DEBUG) {
+          console.log(`ビートカウント: ${beatCount}, 小節の1拍目？: ${isFirstBeatOfMeasure}, 小節カウント: ${localMeasureCount}`);
+        }
+
+        // 小節の最初の拍（1拍目）で、かつ指定された小節数に達した場合に音名を更新
+        if (isFirstBeatOfMeasure) {
+          if (localMeasureCount >= measureCount) {
+            // 音名を更新
+            const newCurrent = nextNote || getRandomNote();
+            const newNext = getRandomNote();
+            
+            // 音名更新のタイミングを明示的にログ出力
+            console.log(`===音名更新のタイミング: 小節=${localMeasureCount}===`);
+            
+            // updateNotesDirectly関数を使って状態を更新
+            updateNotesDirectly(newCurrent, newNext);
+            
+            // カウンターをリセット
+            localMeasureCount = 0;
+            console.log(beatCount, localMeasureCount);
+          }
         }
         
-        // 現在時刻から先読み時間内にスケジュールすべきビートがあるかをチェック
-        const currentTime = audioPlayerRef.current.getCurrentTime();
+        // アタック音を使用するかどうかの設定に基づいて音を選択
+        const soundType = (isFirstBeatOfMeasure && useAttackSound) ? 'attack' : 'beat';
         
-        // スケジュール済みの時間が現在時間 + 先読み時間より前であれば、次の拍をスケジュール
-        while (nextNoteTime < currentTime + scheduleAheadTime) {
-          // 小節の最初の拍かどうかを判定
-          const isFirstBeatOfMeasure = beatCount % timeSignature === 0;
+        // beatCount = beatCount % timeSignature;
+        
+        // 次の小節の始まりを準備
+        if (beatCount === 0) {
+          // この行にもデバッグ出力
+        //   console.log(`小節カウント更新: ${localMeasureCount} -> ${localMeasureCount + 1}`);
           
-          // ビートカウントと小節判定のデバッグ出力
-          if (DEBUG) {
-            console.log(`ビートカウント: ${beatCount}, 小節の1拍目？: ${isFirstBeatOfMeasure}, 小節カウント: ${localMeasureCount}`);
-          }
-          
-          // 小節の最初の拍で小節カウントを更新
-          if (isFirstBeatOfMeasure && beatCount > 0) { // beatCount > 0 は初回の処理をスキップするため
-            // この行にもデバッグ出力
-            console.log(`小節カウント更新: ${localMeasureCount} -> ${localMeasureCount + 1}, ビート=${beatCount}`);
-            
-            // 小節カウントを増加
-            localMeasureCount++;
-            
-            // 音名の更新が必要かチェック (設定された小節数に達したかどうか)
-            if (localMeasureCount >= measureCount) {
-              // 音名を更新
-              const newCurrent = nextNote || getRandomNote();
-              const newNext = getRandomNote();
-              
-              // 音名更新のタイミングを明示的にログ出力
-              console.log(`===音名更新のタイミング: 時間=${nextNoteTime.toFixed(3)}, ビート=${beatCount}===`);
-              
-              // updateNotesDirectly関数を使って状態を更新
-              updateNotesDirectly(newCurrent, newNext);
-              
-              // カウンターをリセット
-              localMeasureCount = 0;
-            }
-          }
-          
-          // アタック音を使用するかどうかの設定に基づいて音を選択
-          const soundType = (isFirstBeatOfMeasure && useAttackSound) ? 'attack' : 'beat';
-          
-          // デバッグ用ログ
-          if (DEBUG) {
-            const beatType = isFirstBeatOfMeasure ? '小節の1拍目' : `${(beatCount % timeSignature) + 1}拍目`;
-            logDebug(`スケジュール - ${beatType}, サウンド: ${soundType}, 時間: ${nextNoteTime.toFixed(3)}`);
-          }
-          
-          // 音をスケジュール
-          if (audioPlayerRef.current) {
-            audioPlayerRef.current.scheduleSound(soundType, nextNoteTime);
-          }
-          
-          // ビートカウントを更新
-          beatCount++;
-          
-          // 次の拍のタイミングを計算
-          const secondsPerBeat = 60.0 / bpm;
-          nextNoteTime += secondsPerBeat;
+          // 小節カウントを増加
+          localMeasureCount++;
+          console.log(beatCount, localMeasureCount);
         }
+
         
-        // 次のスケジューリングのタイミングを設定
-        eventIdRef.current = window.setTimeout(scheduler, 25); // 25msごとにスケジューリングを確認
-      };
-      
-      // スケジューリングを開始
-      scheduler();
+        // 音を再生
+        if (audioPlayerRef.current) {
+          audioPlayerRef.current.scheduleSound(soundType, audioPlayerRef.current.getCurrentTime());
+        }
+      });
       
     } catch (error) {
       console.error('メトロノーム開始中にエラーが発生しました:', error);
       setAudioError('メトロノームの開始中にエラーが発生しました。ページを再読み込みしてください。');
     }
-  }, [audioContextReady, bpm, timeSignature, stopMetronome, updateNotes, useAttackSound, isPlaying, nextNote, getRandomNote]);
+//   }, [audioContextReady, bpm, timeSignature, stopMetronome, useAttackSound, nextNote, getRandomNote, measureCount, updateNotesDirectly]);
+  }, [audioContextReady, bpm, timeSignature, useAttackSound, measureCount]);
   
   // コンポーネントのアンマウント時の処理
   useEffect(() => {
@@ -526,28 +560,19 @@ const App: React.FC = () => {
     handleContinuePlayback(false);
   };
   
-  // 拍子が変更された時の処理
+  // 拍子または小節数が変更された時の処理
   useEffect(() => {
-    // 再生中なら、新しい拍子でメトロノームを再スタート
+    // 再生中なら、新しい設定でメトロノームを再スタート
     if (isPlaying && audioContextReady) {
-      stopMetronome();
+    //   stopMetronome();
       // 少し遅延を入れてから再開する
       setTimeout(() => {
         startMetronome();
       }, 100);
     }
+//   }, [timeSignature, measureCount, isPlaying, audioContextReady, stopMetronome, startMetronome]);
   }, [timeSignature, isPlaying, audioContextReady, stopMetronome, startMetronome]);
 
-  // 小節数が変更された時も同様に処理
-  useEffect(() => {
-    if (isPlaying && audioContextReady) {
-      stopMetronome();
-      setTimeout(() => {
-        startMetronome();
-      }, 100);
-    }
-  }, [measureCount, isPlaying, audioContextReady, stopMetronome, startMetronome]);
-  
   // キーボードショートカットの設定
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -582,6 +607,11 @@ const App: React.FC = () => {
   const handleBpmChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(e.target.value, 10);
     setBpm(value);
+    
+    // BeatManagerにもBPMを設定
+    if (beatManagerRef.current) {
+      beatManagerRef.current.setBpm(value);
+    }
     
     // 再生中ならメトロノームを再起動（少し遅延を入れる）
     if (isPlaying && audioContextReady) {
@@ -639,29 +669,6 @@ const App: React.FC = () => {
     }
   };
 
-  // 音名を更新する関数 - スケジューラー内で直接呼び出す
-  const updateNotesDirectly = useCallback((newCurrent: string, newNext: string) => {
-    // フラグを使用して状態更新中であることをマーク
-    const isUpdating = true;
-    
-    // setTimeout を使わず直接更新
-    setCurrentNote(prevCurrent => {
-      // 前の音名と同じなら更新しない（再レンダリング防止）
-      if (prevCurrent === newCurrent) return prevCurrent;
-      return newCurrent;
-    });
-    
-    setNextNote(prevNext => {
-      // 前の音名と同じなら更新しない（再レンダリング防止）
-      if (prevNext === newNext) return prevNext;
-      return newNext;
-    });
-    
-    if (DEBUG) {
-      console.log(`音名を直接更新: 現在の音名=${newCurrent}, 次の音名=${newNext}`);
-    }
-  }, []);
-
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(to bottom, #121212, #1e1e1e)', color: 'white', display: 'flex', flexDirection: 'column' }}>
       <header style={{ padding: '1.5rem 1rem', background: '#1a1a1a', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
@@ -694,170 +701,179 @@ const App: React.FC = () => {
             {nextNote || '...'}
           </div>
         </div>
-
-        {/* コントロール部分 */}
-        <div style={{ width: '100%', background: '#333', padding: '1.5rem', borderRadius: '0.75rem', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label htmlFor="bpm" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#d1d5db' }}>
-              テンポ: {bpm} BPM
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ marginRight: '0.5rem', fontSize: '0.875rem' }}>20</span>
-              <input
-                id="bpm"
-                type="range"
-                min="20"
-                max="240"
-                value={bpm}
-                onChange={handleBpmChange}
-                style={{ width: '100%', height: '0.5rem', background: '#4b5563', borderRadius: '0.5rem', cursor: 'pointer', accentColor: '#8b5cf6' }}
-              />
-              <span style={{ marginLeft: '0.5rem', fontSize: '0.875rem' }}>240</span>
-            </div>
+        
+        {/* コントロールパネル */}
+        <div style={{ width: '100%', marginBottom: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {/* BPMコントロール */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '1rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+            <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>BPM</div>
+            <input 
+              type="range" 
+              min="20" 
+              max="240" 
+              value={bpm} 
+              onChange={handleBpmChange}
+              style={{ 
+                appearance: 'none',
+                width: '100%',
+                height: '0.25rem',
+                background: 'linear-gradient(to right, #a855f7, #ec4899)',
+                borderRadius: '0.125rem',
+                outline: 'none',
+                cursor: 'pointer'
+              }}
+            />
+            <div style={{ color: 'white', fontWeight: 'bold', fontSize: '1.25rem' }}>{bpm}</div>
           </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-            <div>
-              <label htmlFor="timeSignature" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#d1d5db' }}>
-                拍子
-              </label>
-              <select
-                id="timeSignature"
-                value={timeSignature}
-                onChange={handleTimeSignatureChange}
-                style={{ width: '100%', background: '#1f2937', border: '1px solid #4b5563', borderRadius: '0.375rem', padding: '0.5rem 0.75rem', color: 'white', outline: 'none' }}
-              >
-                <option value="2">2/4</option>
-                <option value="3">3/4</option>
-                <option value="4">4/4</option>
-                <option value="5">5/4</option>
-                <option value="6">6/8</option>
-                <option value="7">7/8</option>
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="metronomeType" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#d1d5db' }}>
-                メトロノーム音
-              </label>
-              <select
-                id="metronomeType"
-                value={metronomeType}
-                onChange={handleMetronomeTypeChange}
-                style={{ width: '100%', background: '#1f2937', border: '1px solid #4b5563', borderRadius: '0.375rem', padding: '0.5rem 0.75rem', color: 'white', outline: 'none' }}
-              >
-                <option value="type1">タイプ1</option>
-                <option value="type2">タイプ2</option>
-              </select>
-            </div>
+          
+          {/* 拍子コントロール */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '1rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+            <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Time Signature</div>
+            <select 
+              value={timeSignature} 
+              onChange={handleTimeSignatureChange}
+              style={{ 
+                background: 'transparent',
+                color: 'white',
+                border: 'none',
+                outline: 'none',
+                fontSize: '1rem',
+                cursor: 'pointer'
+              }}
+            >
+              <option value={4}>4/4</option>
+              <option value={3}>3/4</option>
+              <option value={6}>6/8</option>
+              <option value={5}>5/4</option>
+            </select>
           </div>
-
-          {/* 小節数選択コントロールを追加 */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label htmlFor="measureCount" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#d1d5db' }}>
-              切り替え小節数: {measureCount}小節ごと
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ marginRight: '0.5rem', fontSize: '0.875rem' }}>1</span>
-              <input
-                id="measureCount"
-                type="range"
-                min="1"
-                max="8"
-                value={measureCount}
-                onChange={(e) => setMeasureCount(parseInt(e.target.value, 10))}
-                style={{ width: '100%', height: '0.5rem', background: '#4b5563', borderRadius: '0.5rem', cursor: 'pointer', accentColor: '#8b5cf6' }}
-              />
-              <span style={{ marginLeft: '0.5rem', fontSize: '0.875rem' }}>8</span>
-            </div>
+          
+          {/* 小節数コントロール */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '1rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+            <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Measures per Tone</div>
+            <select 
+              value={measureCount} 
+              onChange={handleMeasureCountChange}
+              style={{ 
+                background: 'transparent',
+                color: 'white',
+                border: 'none',
+                outline: 'none',
+                fontSize: '1rem',
+                cursor: 'pointer'
+              }}
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8].map(count => (
+                <option key={count} value={count}>{count}</option>
+              ))}
+            </select>
           </div>
-
-          {/* アタック音設定用チェックボックスを追加 */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-              <input
-                type="checkbox"
-                checked={useAttackSound}
-                onChange={(e) => setUseAttackSound(e.target.checked)}
-                style={{ marginRight: '0.5rem', width: '1rem', height: '1rem', accentColor: '#8b5cf6' }}
-              />
-              <span style={{ fontSize: '0.875rem', color: '#d1d5db' }}>1拍目のアクセント音を使用する</span>
-            </label>
+          
+          {/* メトロノームタイプコントロール */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '1rem', borderRadius: '0.5rem', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+            <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>Metronome Type</div>
+            <select 
+              value={metronomeType} 
+              onChange={handleMetronomeTypeChange}
+              style={{ 
+                background: 'transparent',
+                color: 'white',
+                border: 'none',
+                outline: 'none',
+                fontSize: '1rem',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="type1">Type 1</option>
+              <option value="type2">Type 2</option>
+            </select>
           </div>
-
-          <button
-            onClick={togglePlayback}
-            style={{
-              width: '100%',
-              padding: '1rem',
-              borderRadius: '0.5rem',
-              border: 'none',
-              color: 'white',
-              cursor: 'pointer',
-              transition: 'all 0.3s',
-              background: isPlaying
-                ? 'linear-gradient(to right, #ef4444, #dc2626)'
-                : 'linear-gradient(to right, #8b5cf6, #6366f1)',
-              boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {isPlaying ? (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" style={{ height: '1.25rem', width: '1.25rem', marginRight: '0.5rem' }} viewBox="0 0 20 20" fill="currentColor">
-                    <rect x="6" y="4" width="3" height="12" fill="currentColor" />
-                    <rect x="11" y="4" width="3" height="12" fill="currentColor" />
-                  </svg>
-                  停止
-                </>
-              ) : (
-                <>
-                  <svg xmlns="http://www.w3.org/2000/svg" style={{ height: '1.25rem', width: '1.25rem', marginRight: '0.5rem' }} viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                  </svg>
-                  再生
-                </>
-              )}
-            </div>
-          </button>
         </div>
-
-        <div style={{ marginTop: '2rem', fontSize: '0.875rem', color: '#9ca3af' }}>
-          <p style={{ textAlign: 'center' }}>スペースキーで再生/停止を切り替え</p>
-          <p style={{ textAlign: 'center' }}>↑/↓キーでテンポを調整</p>
-          <p style={{ textAlign: 'center' }}>←/→キーで切り替え小節数を調整</p>
-        </div>
-      </main>
-
-      <footer style={{ padding: '1rem', textAlign: 'center', color: '#9ca3af', fontSize: '0.75rem' }}>
-        <p>© 2025 RandomTone</p>
-      </footer>
-
-      {/* 反復処理の継続確認ダイアログ */}
-      {showContinueDialog && (
-        <div style={{ position: 'fixed', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.75)', zIndex: 50 }}>
-          <div style={{ background: '#1f2937', borderRadius: '0.5rem', boxShadow: '0 10px 15px rgba(0,0,0,0.3)', padding: '1.5rem', maxWidth: '24rem', width: '100%' }}>
-            <h2 style={{ fontSize: '1.125rem', fontWeight: 'bold', marginBottom: '1rem', textAlign: 'center' }}>処理の継続確認</h2>
-            <p style={{ fontSize: '0.875rem', color: '#d1d5db', marginBottom: '1rem', textAlign: 'center' }}>
-              処理を続行しますか？
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem' }}>
-              <button
+        
+        {/* 再生/停止ボタン */}
+        <button 
+          onClick={togglePlayback}
+          style={{ 
+            background: isPlaying ? '#ef4444' : '#4caf50',
+            color: 'white',
+            padding: '1rem 2rem',
+            borderRadius: '0.5rem',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: '1.25rem',
+            fontWeight: 'bold',
+            width: '100%',
+            transition: 'background 0.3s'
+          }}
+        >
+          {isPlaying ? '停止' : '再生'}
+        </button>
+        
+        {/* 継続確認ダイアログ */}
+        {showContinueDialog && (
+          <div style={{ 
+            position: 'fixed', 
+            top: '50%', 
+            left: '50%', 
+            transform: 'translate(-50%, -50%)', 
+            background: '#1a1a1a', 
+            padding: '2rem', 
+            borderRadius: '0.5rem', 
+            boxShadow: '0 4px 8px rgba(0,0,0,0.2)', 
+            zIndex: 1000,
+            width: '90vw',
+            maxWidth: '400px'
+          }}>
+            <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
+              <div style={{ fontSize: '1.125rem', fontWeight: '600', marginBottom: '0.5rem' }}>再生を続けますか？</div>
+              <div style={{ color: '#9ca3af', fontSize: '0.875rem' }}>5分経過しました。続ける場合は「はい」をクリックしてください。</div>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <button 
                 onClick={handleContinue}
-                style={{ flex: 1, background: '#8b5cf6', color: 'white', fontWeight: '600', padding: '0.5rem 1rem', borderRadius: '0.5rem', border: 'none', cursor: 'pointer', transition: 'background 0.3s' }}
+                style={{ 
+                  background: '#4caf50', 
+                  color: 'white', 
+                  padding: '0.75rem 1.5rem', 
+                  borderRadius: '0.375rem', 
+                  border: 'none', 
+                  cursor: 'pointer', 
+                  fontSize: '1rem', 
+                  fontWeight: '500', 
+                  flex: 1, 
+                  marginRight: '0.5rem',
+                  transition: 'background 0.3s'
+                }}
               >
-                続行
+                はい
               </button>
-              <button
+              <button 
                 onClick={handleStop}
-                style={{ flex: 1, background: '#ef4444', color: 'white', fontWeight: '600', padding: '0.5rem 1rem', borderRadius: '0.5rem', border: 'none', cursor: 'pointer', transition: 'background 0.3s' }}
+                style={{ 
+                  background: '#ef4444', 
+                  color: 'white', 
+                  padding: '0.75rem 1.5rem', 
+                  borderRadius: '0.375rem', 
+                  border: 'none', 
+                  cursor: 'pointer', 
+                  fontSize: '1rem', 
+                  fontWeight: '500', 
+                  flex: 1,
+                  transition: 'background 0.3s'
+                }}
               >
-                停止
+                いいえ
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+        
+        {/* フッター */}
+        <footer style={{ padding: '1rem', textAlign: 'center', fontSize: '0.875rem', color: '#9ca3af', marginTop: 'auto' }}>
+          <div>© 2023 RandomTone. All rights reserved.</div>
+        </footer>
+      </main>
     </div>
   );
 }
