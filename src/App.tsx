@@ -544,23 +544,27 @@ const App: React.FC = () => {
       <main className="main-content">
         <ErrorMessage message={audioError} />
         
-        <div className="note-display-container">
+        {/* 音符表示を最大限に広げる */}
+        <div className="note-display-container flex-grow">
           <NoteDisplay currentNote={currentNote} nextNote={nextNote} />
         </div>
         
-        <div className="control-panel">
-          <MetronomeControls
-            controlState={controlState}
-            onBpmChange={handleBpmChange}
-            onTimeSignatureChange={handleTimeSignatureChange}
-            onMeasureCountChange={handleMeasureCountChange}
-            onMetronomeTypeChange={handleMetronomeTypeChange}
-            onAttackSoundChange={handleAttackSoundChange}
-          />
-        </div>
-        
-        <div>
-          <PlayButton isPlaying={isPlaying} onTogglePlay={togglePlayback} />
+        {/* コントロールパネルとプレイボタンをフッターの上にまとめて配置 */}
+        <div className="bottom-controls">
+          <div className="control-panel">
+            <MetronomeControls
+              controlState={controlState}
+              onBpmChange={handleBpmChange}
+              onTimeSignatureChange={handleTimeSignatureChange}
+              onMeasureCountChange={handleMeasureCountChange}
+              onMetronomeTypeChange={handleMetronomeTypeChange}
+              onAttackSoundChange={handleAttackSoundChange}
+            />
+          </div>
+          
+          <div className="play-button-container">
+            <PlayButton isPlaying={isPlaying} onTogglePlay={togglePlayback} />
+          </div>
         </div>
         
         <ContinueDialog

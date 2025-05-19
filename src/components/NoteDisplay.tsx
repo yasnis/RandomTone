@@ -8,6 +8,7 @@ interface NoteDisplayProps {
 const NoteDisplay: React.FC<NoteDisplayProps> = ({ currentNote, nextNote }) => {
   return (
     <div className="note-display">
+      <div className="note-background"></div>
       <div className="current-note">
         {currentNote || '準備中...'}
       </div>
