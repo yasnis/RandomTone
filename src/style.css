@@ -130,6 +130,14 @@ body {
   align-items: center;
   justify-content: center;
   position: relative;
+  cursor: pointer; /* クリック可能なことを示すカーソル */
+  user-select: none; /* テキスト選択を防止 */
+  transition: transform 0.15s ease-out; /* クリック効果のためのトランジション */
+}
+
+/* タップ時の視覚的なフィードバック */
+.note-display:active {
+  /* transform: scale(0.98); */
 }
 
 /* 円形の背景要素 */
@@ -146,20 +154,28 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   border: 1px solid var(--color-border);
   z-index: 0;
-  transition: transform 0.1s ease, background-color 0.1s ease;
+  transition: transform 0.05s ease-out, background-color 0.05s ease-out, box-shadow 0.2s ease;
+}
+
+/* 再生中のスタイル */
+.note-background.playing {
+  border-color: var(--color-success);
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
 }
 
 /* ビートアニメーション - 通常のビート */
 .note-background.beat-active {
+  background-color: rgba(16, 185, 129, 0.2);
   transform: translate(-50%, -50%) scale(1.05);
   box-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
-  transform: translate(-50%, -50%) scale(1.05);
 }
 
 /* 小節の1拍目の特別なスタイル */
 .note-background.first-beat {
-  background-color: rgba(139, 92, 246, 0.2);
+  background-color: rgba(139, 92, 246, 0.4);
+  border-color: rgba(139, 92, 246, 1.0);
   box-shadow: 0 0 15px rgba(139, 92, 246, 0.6);
+  transform: translate(-50%, -50%) scale(1.1);
 }
 
 .current-note {
@@ -201,13 +217,13 @@ body {
 .bottom-controls {
   width: 100%;
   margin-top: auto;
-  margin-bottom: 0.5rem;
+  /* margin-bottom: 0.5rem; */
 }
 
 /* コントロールパネルをコンパクトに */
 .control-panel {
   width: 100%;
-  margin-bottom: 0.75rem;
+  /* margin-bottom: 0.75rem; */
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -485,7 +501,7 @@ body {
   font-size: 0.65rem;
   color: var(--color-text-secondary);
   margin-top: auto;
-  border-top: 1px solid var(--color-border);
+  /* border-top: 1px solid var(--color-border); */
 }
 
 .footer-brand {

@@ -9,8 +9,7 @@ import Footer from './components/Footer';
 import ErrorMessage from './components/ErrorMessage';
 import NoteDisplay from './components/NoteDisplay';
 import MetronomeControls from './components/MetronomeControls';
-import PlayButton from './components/PlayButton';
-import ContinueDialog from './components/ContinueDialog';
+import ContinueDialog from './components/ContinueDialog'; // ContinueDialogコンポーネントをインポート
 
 // 設定の保存/読み込み機能をインポート
 import { loadSettings, saveSettings, defaultSettings } from './utils/SettingsStorage';
@@ -564,10 +563,12 @@ const App: React.FC = () => {
             nextNote={nextNote} 
             beatActive={beatActive}
             isFirstBeat={isFirstBeat}
+            onTap={togglePlayback}
+            isPlaying={isPlaying}
           />
         </div>
         
-        {/* コントロールパネルとプレイボタンをフッターの上にまとめて配置 */}
+        {/* コントロールパネルのみ表示、プレイボタンは非表示に */}
         <div className="bottom-controls">
           <div className="control-panel">
             <MetronomeControls
@@ -578,10 +579,6 @@ const App: React.FC = () => {
               onMetronomeTypeChange={handleMetronomeTypeChange}
               onAttackSoundChange={handleAttackSoundChange}
             />
-          </div>
-          
-          <div className="play-button-container">
-            <PlayButton isPlaying={isPlaying} onTogglePlay={togglePlayback} />
           </div>
         </div>
         
