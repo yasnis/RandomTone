@@ -12,7 +12,7 @@ export class BeatManager {
   private listeners: Array<() => void> = [];
 
   // デバッグモード
-  private debug: boolean = true;
+  private debug: boolean = false;
 
   /**
    * コンストラクタ

@@ -5,7 +5,7 @@ import { BeatManager } from './BeatManager';
 const NOTES = ['C', 'C#', 'Db', 'D', 'D#', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'G#', 'Ab', 'A', 'A#', 'Bb', 'B'];
 
 // デバッグモード - デバッグ出力を確認するためにtrueに設定
-const DEBUG = true;
+const DEBUG = false;
 
 // 条件付きログ出力ヘルパー関数
 const logDebug = (...args: any[]) => {
@@ -319,16 +319,26 @@ const App: React.FC = () => {
   
   // 音名を更新する関数 - スケジューラー内で直接呼び出す
   const updateNotesDirectly = useCallback((newCurrent: string, newNext: string) => {
+    console.log(`updateNotesDirectly呼び出し: newCurrent=${newCurrent}, newNext=${newNext}`);
+    
     // setTimeout を使わず直接更新
     setCurrentNote(prevCurrent => {
       // 前の音名と同じなら更新しない（再レンダリング防止）
-      if (prevCurrent === newCurrent) return prevCurrent;
+      if (prevCurrent === newCurrent) {
+        console.log('現在の音名が同じため更新しません:', prevCurrent);
+        return prevCurrent;
+      }
+      console.log(`現在の音名を更新: ${prevCurrent} -> ${newCurrent}`);
       return newCurrent;
     });
     
     setNextNote(prevNext => {
       // 前の音名と同じなら更新しない（再レンダリング防止）
-      if (prevNext === newNext) return prevNext;
+      if (prevNext === newNext) {
+        console.log('次の音名が同じため更新しません:', prevNext);
+        return prevNext;
+      }
+      console.log(`次の音名を更新: ${prevNext} -> ${newNext}`);
       return newNext;
     });
     
@@ -383,7 +393,9 @@ const App: React.FC = () => {
   // メトロノームを開始する関数
   const startMetronome = useCallback(() => {
     if (!audioContextReady || !audioPlayerRef.current) return;
-    console.trace('\tメトロノームを開始します');
+    if (DEBUG) {
+        console.trace('\tメトロノームを開始します');
+    }
     try {
       // 既存のメトロノームを停止して完全に新しくする
       stopMetronome();
@@ -401,7 +413,7 @@ const App: React.FC = () => {
         beatManagerRef.current = new BeatManager(bpm, DEBUG);
       } else {
         // 既存のBeatManagerのBPMを更新
-        // beatManagerRef.current.setBpm(bpm);
+        beatManagerRef.current.setBpm(bpm);
       }
       
       // 小節カウントと拍カウントを初期化
@@ -413,6 +425,10 @@ const App: React.FC = () => {
         beatListenerCleanupRef.current();
         beatListenerCleanupRef.current = null;
       }
+      
+      // 現在の音名と次の音名を直接取得（クロージャの問題を回避）
+      const currentNoteAtStart = currentNote;
+      let nextNoteAtStart = nextNote;
       
       // BeatManagerにビートイベントリスナーを登録
       beatListenerCleanupRef.current = beatManagerRef.current.addBeatListener(() => {
@@ -427,40 +443,34 @@ const App: React.FC = () => {
           console.log(`ビートカウント: ${beatCount}, 小節の1拍目？: ${isFirstBeatOfMeasure}, 小節カウント: ${localMeasureCount}`);
         }
 
-        // 小節の最初の拍（1拍目）で、かつ指定された小節数に達した場合に音名を更新
+        // 小節の最初の拍のときに小節カウントを増加
         if (isFirstBeatOfMeasure) {
+          // 小節カウントを増加
+          localMeasureCount++;
+          
+          // 小節カウントのデバッグ出力
+          if (DEBUG) {
+            console.log(`小節カウント更新: ${localMeasureCount}`);
+          }
+          
+          // 指定された小節数に達した場合に音名を更新
           if (localMeasureCount >= measureCount) {
             // 音名を更新
-            const newCurrent = nextNote || getRandomNote();
-            const newNext = getRandomNote();
-            
-            // 音名更新のタイミングを明示的にログ出力
-            console.log(`===音名更新のタイミング: 小節=${localMeasureCount}===`);
-            
-            // updateNotesDirectly関数を使って状態を更新
-            updateNotesDirectly(newCurrent, newNext);
+            const newCurrentNote = nextNoteAtStart || getRandomNote();
+            const newNextNote = getRandomNote();
+            nextNoteAtStart = newNextNote;
+
+            // 直接状態を更新
+            setCurrentNote(newCurrentNote);
+            setNextNote(newNextNote);
             
             // カウンターをリセット
             localMeasureCount = 0;
-            console.log(beatCount, localMeasureCount);
           }
         }
         
         // アタック音を使用するかどうかの設定に基づいて音を選択
         const soundType = (isFirstBeatOfMeasure && useAttackSound) ? 'attack' : 'beat';
-        
-        // beatCount = beatCount % timeSignature;
-        
-        // 次の小節の始まりを準備
-        if (beatCount === 0) {
-          // この行にもデバッグ出力
-        //   console.log(`小節カウント更新: ${localMeasureCount} -> ${localMeasureCount + 1}`);
-          
-          // 小節カウントを増加
-          localMeasureCount++;
-          console.log(beatCount, localMeasureCount);
-        }
-
         
         // 音を再生
         if (audioPlayerRef.current) {
@@ -472,7 +482,6 @@ const App: React.FC = () => {
       console.error('メトロノーム開始中にエラーが発生しました:', error);
       setAudioError('メトロノームの開始中にエラーが発生しました。ページを再読み込みしてください。');
     }
-//   }, [audioContextReady, bpm, timeSignature, stopMetronome, useAttackSound, nextNote, getRandomNote, measureCount, updateNotesDirectly]);
   }, [audioContextReady, bpm, timeSignature, useAttackSound, measureCount]);
   
   // コンポーネントのアンマウント時の処理
@@ -570,7 +579,6 @@ const App: React.FC = () => {
         startMetronome();
       }, 100);
     }
-//   }, [timeSignature, measureCount, isPlaying, audioContextReady, stopMetronome, startMetronome]);
   }, [timeSignature, isPlaying, audioContextReady, stopMetronome, startMetronome]);
 
   // キーボードショートカットの設定
