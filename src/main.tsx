@@ -10,11 +10,8 @@ if (appElement) {
   try {
     console.log('アプリのマウント処理を開始します');
     const root = ReactDOM.createRoot(appElement);
-    root.render(
-      <React.StrictMode>
-        <App />
-      </React.StrictMode>
-    );
+    // StrictModeを削除してAudioContextの二重初期化問題を解決
+    root.render(<App />);
     console.log('アプリのマウント処理が完了しました');
   } catch (error) {
     console.error('Reactアプリのマウント中にエラーが発生しました:', error);
