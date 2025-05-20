@@ -1,4 +1,5 @@
 import React from 'react';
+import { trackEvent, EventCategory } from '../utils/Analytics';
 
 interface NoteDisplayProps {
   currentNote: string;
@@ -27,6 +28,13 @@ const NoteDisplay: React.FC<NoteDisplayProps> = ({
 
   // タップ時の処理
   const handleTap = () => {
+    // タップイベントを追跡
+    trackEvent(
+      EventCategory.NOTE, 
+      isPlaying ? 'note_display_tap_pause' : 'note_display_tap_play', 
+      `CurrentNote: ${currentNote}`
+    );
+    
     if (onTap) {
       onTap();
     }

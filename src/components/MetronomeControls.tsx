@@ -1,4 +1,5 @@
 import React from 'react';
+import { trackEvent, EventCategory } from '../utils/Analytics';
 
 // 直接型をインラインで定義して外部依存を減らす
 interface ControlState {
@@ -28,6 +29,61 @@ const MetronomeControls: React.FC<MetronomeControlsProps> = ({
 }) => {
   const { bpm, timeSignature, measureCount, metronomeType, useAttackSound } = controlState;
   
+  // 拡張されたイベントハンドラ
+  const handleBpmChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = parseInt(e.target.value, 10);
+    
+    // BPM変更のUI操作方法を追跡（スライダーの使用）
+    trackEvent(EventCategory.SETTINGS, 'change_bpm_ui', `Slider: ${newValue}`, newValue);
+    
+    // 元のハンドラを呼び出し
+    onBpmChange(e);
+  };
+  
+  const handleTimeSignatureChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    // 詳細な拍子変更を追跡
+    trackEvent(
+      EventCategory.SETTINGS, 
+      'select_time_signature_ui', 
+      `Changed to: ${e.target.value}`
+    );
+    
+    onTimeSignatureChange(e);
+  };
+  
+  const handleMeasureCountChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    // 詳細な小節数変更を追跡
+    trackEvent(
+      EventCategory.SETTINGS, 
+      'select_measure_count_ui', 
+      `Changed to: ${e.target.value}`
+    );
+    
+    onMeasureCountChange(e);
+  };
+  
+  const handleMetronomeTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    // メトロノームタイプの変更を追跡
+    trackEvent(
+      EventCategory.SETTINGS, 
+      'select_metronome_type_ui', 
+      `Changed to: ${e.target.value}`
+    );
+    
+    onMetronomeTypeChange(e);
+  };
+  
+  const handleAttackSoundChange = (checked: boolean) => {
+    // アタック音設定変更を追跡
+    trackEvent(
+      EventCategory.SETTINGS, 
+      'toggle_attack_sound_ui', 
+      `Changed to: ${checked ? 'enabled' : 'disabled'}`
+    );
+    
+    onAttackSoundChange(checked);
+  };
+  
   return (
     <div className="settings-panel">
       <div className="settings-content">
@@ -40,7 +96,7 @@ const MetronomeControls: React.FC<MetronomeControlsProps> = ({
               min="20" 
               max="240" 
               value={bpm} 
-              onChange={onBpmChange}
+              onChange={handleBpmChange}
               className="bpm-slider"
             />
             <span className="bpm-value">{bpm}</span>
@@ -54,7 +110,7 @@ const MetronomeControls: React.FC<MetronomeControlsProps> = ({
             <div className="compact-label">Beat</div>
             <select 
               value={timeSignature} 
-              onChange={onTimeSignatureChange}
+              onChange={handleTimeSignatureChange}
               className="control-select"
             >
               <option value={4}>4/4</option>
@@ -69,7 +125,7 @@ const MetronomeControls: React.FC<MetronomeControlsProps> = ({
             <div className="compact-label">Measure num</div>
             <select 
               value={measureCount} 
-              onChange={onMeasureCountChange}
+              onChange={handleMeasureCountChange}
               className="control-select"
             >
               {[1, 2, 3, 4, 5, 6, 7, 8].map(count => (
@@ -83,7 +139,7 @@ const MetronomeControls: React.FC<MetronomeControlsProps> = ({
             <div className="compact-label">Type</div>
             <select 
               value={metronomeType} 
-              onChange={onMetronomeTypeChange}
+              onChange={handleMetronomeTypeChange}
               className="control-select"
             >
               <option value="type1">Default</option>
@@ -98,7 +154,7 @@ const MetronomeControls: React.FC<MetronomeControlsProps> = ({
               <input 
                 type="checkbox" 
                 checked={useAttackSound} 
-                onChange={(e) => onAttackSoundChange(e.target.checked)}
+                onChange={(e) => handleAttackSoundChange(e.target.checked)}
                 className="switch-input"
               />
               <span className="switch-slider"></span>

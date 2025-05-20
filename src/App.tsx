@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BeatManager } from './utils/BeatManager';
 import { AudioPlayer } from './utils/AudioPlayer';
 import { NOTES } from './types/index';
+import { trackEvent, trackPageView, EventCategory } from './utils/Analytics'; // Google Analytics関連をインポート
 
 // コンポーネントをインポート
 import Header from './components/Header';
@@ -74,6 +75,11 @@ const App: React.FC = () => {
   const intervalRef = useRef<number | null>(null);
   // ビートリスナーの削除用関数を保持する
   const beatListenerCleanupRef = useRef<(() => void) | null>(null);
+
+  // コンポーネントマウント時にページビューを追跡する
+  useEffect(() => {
+    trackPageView('/'); // ホームページのページビューを追跡
+  }, []);
 
   // 設定変更を監視し、変更があった場合に保存する
   useEffect(() => {
@@ -181,7 +187,12 @@ const App: React.FC = () => {
       beatListenerCleanupRef.current();
       beatListenerCleanupRef.current = null;
     }
-  }, []);
+    
+    // メトロノーム停止時にイベントを追跡
+    if (isPlaying) {
+      trackEvent(EventCategory.PLAY, 'stop_metronome', `BPM: ${bpm}, TimeSignature: ${timeSignature}`);
+    }
+  }, [audioContextReady, bpm, timeSignature, isPlaying]);
   
   // 継続確認タイマーをスタートする関数
   const startContinuationTimer = useCallback(() => {
@@ -229,6 +240,9 @@ const App: React.FC = () => {
         // 既存のBeatManagerのBPMを更新
         beatManagerRef.current.setBpm(bpm);
       }
+      
+      // メトロノーム開始時にイベントを追跡
+      trackEvent(EventCategory.PLAY, 'start_metronome', `BPM: ${bpm}, TimeSignature: ${timeSignature}`);
       
       // 小節カウントと拍カウントを初期化
       let beatCount = timeSignature - 1; // 1小節内の拍カウント (0から始まり timeSignature - 1 まで)
@@ -305,6 +319,9 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('メトロノーム開始中にエラーが発生しました:', error);
       setAudioError('メトロノームの開始中にエラーが発生しました。ページを再読み込みしてください。');
+      
+      // エラー発生時にイベント追跡
+      trackEvent(EventCategory.ERROR, 'metronome_start_error', String(error));
     }
   }, [audioContextReady, bpm, timeSignature, useAttackSound, measureCount]);
   
@@ -352,6 +369,9 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('AudioContextの初期化に失敗しました:', error);
       setAudioError('音声の初期化中にエラーが発生しました。ページを再読み込みして再試行してください。');
+      
+      // エラー発生時にイベント追跡
+      trackEvent(EventCategory.ERROR, 'audio_context_init_error', String(error));
       return false;
     }
   }, [metronomeType]);
@@ -381,6 +401,9 @@ const App: React.FC = () => {
         setIsPlaying(false);
         stopMetronome();
         
+        // 再生停止時にイベントを追跡
+        trackEvent(EventCategory.PLAY, 'stop', `BPM: ${bpm}`);
+        
         // 反復処理のタイムアウトをクリア
         if (continuationTimeout) {
           window.clearTimeout(continuationTimeout);
@@ -389,6 +412,10 @@ const App: React.FC = () => {
       } else {
         // まず再生状態を更新してからメトロノームを開始
         setIsPlaying(true);
+        
+        // 再生開始時にイベントを追跡
+        trackEvent(EventCategory.PLAY, 'start', `BPM: ${bpm}`);
+        
         // わずかな遅延を入れて状態更新が反映されるのを待つ
         setTimeout(() => {
           startMetronome();
@@ -399,8 +426,11 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('再生/停止中にエラーが発生しました:', error);
       setAudioError('音声処理中にエラーが発生しました。ページを再読み込みしてください。');
+      
+      // エラー発生時にイベント追跡
+      trackEvent(EventCategory.ERROR, 'playback_toggle_error', String(error));
     }
-  }, [audioContextReady, audioInitialized, initAudioContext, isPlaying, startMetronome, stopMetronome, continuationTimeout, startContinuationTimer]);
+  }, [audioContextReady, audioInitialized, initAudioContext, isPlaying, startMetronome, stopMetronome, continuationTimeout, startContinuationTimer, bpm]);
   
   // 反復処理の継続を処理する関数
   const handleContinuePlayback = useCallback((shouldContinue: boolean) => {
@@ -411,68 +441,26 @@ const App: React.FC = () => {
       setIsPlaying(true);
       startMetronome();
       startContinuationTimer();
+      
+      // 継続を選択したことを追跡
+      trackEvent(EventCategory.PLAY, 'continue_after_timeout', `BPM: ${bpm}, TimeSignature: ${timeSignature}`);
     } else {
       // 再生を停止
       setIsPlaying(false);
       stopMetronome();
-    }
-  }, [setIsPlaying, startMetronome, stopMetronome, startContinuationTimer]);
-  
-  // 反復処理を続行する
-  const handleContinue = () => {
-    handleContinuePlayback(true);
-  };
-
-  // 反復処理を終了する
-  const handleStop = () => {
-    handleContinuePlayback(false);
-  };
-  
-  // 拍子または小節数が変更された時の処理
-  useEffect(() => {
-    // 再生中なら、新しい設定でメトロノームを再スタート
-    if (isPlaying && audioContextReady) {
-      // 少し遅延を入れてから再開する
-      setTimeout(() => {
-        startMetronome();
-      }, 100);
-    }
-  }, [timeSignature, measureCount, isPlaying, audioContextReady, startMetronome]);
-
-  // キーボードショートカットの設定
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        e.preventDefault();
-        togglePlayback();
-      }
       
-      if (e.code === 'ArrowUp') {
-        setBpm(prev => Math.min(prev + 5, 240));
-      }
-      if (e.code === 'ArrowDown') {
-        setBpm(prev => Math.max(prev - 5, 20));
-      }
-      
-      // 左右矢印キーで小節数を調整する機能を追加
-      if (e.code === 'ArrowRight') {
-        setMeasureCount(prev => Math.min(prev + 1, 8));
-      }
-      if (e.code === 'ArrowLeft') {
-        setMeasureCount(prev => Math.max(prev - 1, 1));
-      }
-    };
-    
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [togglePlayback]);
+      // 停止を選択したことを追跡
+      trackEvent(EventCategory.PLAY, 'stop_after_timeout', `BPM: ${bpm}, TimeSignature: ${timeSignature}`);
+    }
+  }, [setIsPlaying, startMetronome, stopMetronome, startContinuationTimer, bpm, timeSignature]);
   
   // BPM調整ハンドラー
   const handleBpmChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(e.target.value, 10);
     setBpm(value);
+    
+    // 設定変更を追跡
+    trackEvent(EventCategory.SETTINGS, 'change_bpm', `BPM: ${value}`, value);
     
     // BeatManagerにもBPMを設定
     if (beatManagerRef.current) {
@@ -493,18 +481,27 @@ const App: React.FC = () => {
   const handleTimeSignatureChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = parseInt(e.target.value, 10);
     setTimeSignature(value);
+    
+    // 設定変更を追跡
+    trackEvent(EventCategory.SETTINGS, 'change_time_signature', `TimeSignature: ${value}`, value);
   };
   
   // 小節数調整ハンドラー
   const handleMeasureCountChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = parseInt(e.target.value, 10);
     setMeasureCount(value);
+    
+    // 設定変更を追跡
+    trackEvent(EventCategory.SETTINGS, 'change_measure_count', `MeasureCount: ${value}`, value);
   };
   
   // メトロノームタイプ変更ハンドラー
   const handleMetronomeTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newType = e.target.value;
     setMetronomeType(newType);
+    
+    // 設定変更を追跡
+    trackEvent(EventCategory.SETTINGS, 'change_metronome_type', `Type: ${newType}`);
     
     if (!audioContextReady) {
       return;
@@ -538,6 +535,9 @@ const App: React.FC = () => {
   // アタック音設定変更ハンドラー
   const handleAttackSoundChange = (useAttack: boolean) => {
     setUseAttackSound(useAttack);
+    
+    // 設定変更を追跡
+    trackEvent(EventCategory.SETTINGS, 'change_attack_sound', `UseAttack: ${useAttack}`);
   };
 
   // メトロノームコントロールの状態をまとめる
